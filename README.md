@@ -79,15 +79,6 @@ dart run build_runner build --delete-conflicting-outputs
 flutter run -d windows
 ```
 
-**Default login (seeded):**
-| Role | Email | Password |
-|---|---|---|
-| Owner | owner@pos.local | admin123 |
-| Manager | manager@pos.local | admin123 |
-| Cashier | cashier@pos.local | admin123 |
-| Waiter | waiter@pos.local | admin123 |
-| Kitchen | kitchen@pos.local | admin123 |
-
 Seed data includes: 2 floors, 12 tables, 6 menu groups (Karahi, Biryani, Beverages, BBQ, Desserts, Rolls & Sandwiches) each pre-populated with realistic items and prices so you can test the full flow immediately.
 
 ---
