@@ -1022,9 +1022,9 @@ class _GroupGrid extends StatelessWidget {
                 border: Border.all(color: const Color(0xFFD97706).withAlpha(60)),
               ),
               child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Icon(Icons.local_offer_rounded, size: 36, color: const Color(0xFFD97706)),
+                Icon(Icons.local_offer_rounded, size: 44, color: const Color(0xFFD97706)),
                 const SizedBox(height: 8),
-                Text('Deals', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: const Color(0xFFD97706))),
+                Text('Deals', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: const Color(0xFFD97706))),
               ]),
             ),
           );
@@ -1044,11 +1044,11 @@ class _GroupGrid extends StatelessWidget {
               hasIcon
                 ? ClipRRect(
                     borderRadius: BorderRadius.circular(12),
-                    child: Image.file(File(AppPaths.resolve(g.iconPath)), width: 48, height: 48, fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Icon(Icons.restaurant_menu_rounded, size: 36, color: color)),
+                    child: SizedBox(width: 64, height: 64, child: Image.file(File(AppPaths.resolve(g.iconPath)), fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Icon(Icons.restaurant_menu_rounded, size: 48, color: color))),
                   )
-                : Icon(Icons.restaurant_menu_rounded, size: 36, color: color),
-              const SizedBox(height: 8),
+                : Icon(Icons.restaurant_menu_rounded, size: 48, color: color),
+              const SizedBox(height: 6),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6),
                 child: Text(g.name, maxLines: 2, textAlign: TextAlign.center, overflow: TextOverflow.ellipsis,
