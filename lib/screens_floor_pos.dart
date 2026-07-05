@@ -451,26 +451,9 @@ class POSScreen extends ConsumerStatefulWidget {
 class _POSScreenState extends ConsumerState<POSScreen> {
   int? _selectedGroupId;
   String _search = '';
-  List<MenuGroupEntity> _groups = [];
   final _searchCtrl = TextEditingController();
   bool _showSearch = false;
   bool _showDeals = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadGroups();
-  }
-
-  Future<void> _loadGroups() async {
-    final groups = await ref.read(dbProvider).menuDao.getGroups();
-    if (mounted) {
-      setState(() {
-        _groups = groups.map((r) => MenuGroupEntity(id: r.id, name: r.name, iconPath: r.iconPath, colorHex: r.colorHex, sortOrder: r.sortOrder)).toList();
-        if (groups.isNotEmpty) _selectedGroupId = groups.first.id;
-      });
-    }
-  }
 
   @override
   void dispose() { _searchCtrl.dispose(); super.dispose(); }
@@ -481,6 +464,8 @@ class _POSScreenState extends ConsumerState<POSScreen> {
     final order = orderAsync.valueOrNull;
     final isDark = context.isDark;
     final settings = ref.watch(settingsProvider);
+    final groupsAsync = ref.watch(menuGroupsProvider);
+    final groups = groupsAsync.valueOrNull ?? [];
 
     return Scaffold(
       appBar: AppBar(
@@ -546,80 +531,15 @@ class _POSScreenState extends ConsumerState<POSScreen> {
             ) : const SizedBox.shrink(),
           ),
 
-          // Deal and group tabs
-          if (!_showSearch) Container(
-            height: 56,
-            color: isDark ? AppColors.darkCard : Colors.white,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              children: [
-                GestureDetector(
-                  onTap: () => setState(() => _showDeals = true),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    margin: const EdgeInsets.only(right: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: _showDeals ? const Color(0xFFD97706) : const Color(0xFFD97706).withAlpha(18),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: const Color(0xFFD97706).withAlpha(_showDeals ? 0 : 70), width: _showDeals ? 0 : 0.5),
-                    ),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(Icons.local_offer_rounded, size: 15, color: _showDeals ? Colors.white : const Color(0xFFD97706)),
-                      const SizedBox(width: 5),
-                      Text('Deals', style: TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w700,
-                        color: _showDeals ? Colors.white : const Color(0xFFD97706),
-                      )),
-                    ]),
-                  ),
-                ),
-                ..._groups.map((g) {
-                  final sel = !_showDeals && g.id == _selectedGroupId;
-                  final color = _hexColor(g.colorHex);
-                  return GestureDetector(
-                    onTap: () => setState(() { _selectedGroupId = g.id; _showDeals = false; }),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      margin: const EdgeInsets.only(right: 8),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: sel ? color : color.withAlpha(18),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: sel ? color : color.withAlpha(60), width: sel ? 0 : 0.5),
-                      ),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        if (g.iconPath.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 5),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(10),
-                              child: Image.file(File(AppPaths.resolve(g.iconPath)), width: 18, height: 18, fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => Icon(Icons.restaurant_menu, size: 14, color: sel ? Colors.white : color)),
-                              ),
-                          ),
-                        Text(g.name, style: TextStyle(
-                          fontSize: 13, fontWeight: FontWeight.w600,
-                          color: sel ? Colors.white : color,
-                        )),
-                      ]),
-                    ),
-                  );
-                }),
-              ],
-            ),
-          ),
-
-          // Menu items grid
+          // Menu grid — groups or items
           Expanded(
             child: _search.isNotEmpty
               ? _SearchResults(search: _search, onAdd: _addItem)
               : _showDeals
                 ? _DealsGrid(onAdd: _addDeal)
               : _selectedGroupId == null
-                ? const Center(child: Text('No menu groups found'))
-                : _MenuGrid(groupId: _selectedGroupId!, onAdd: _addItem),
+                ? _GroupGrid(groups: groups, onGroupTap: (g) => setState(() { _selectedGroupId = g.id; _showDeals = false; }), onDealsTap: () => setState(() => _showDeals = true))
+                : _MenuGrid(groupId: _selectedGroupId!, onAdd: _addItem, onBack: () => setState(() => _selectedGroupId = null)),
           ),
         ])),
 
@@ -925,33 +845,55 @@ class _DealPlaceholderImg extends StatelessWidget {
 }
 
 class _MenuGrid extends ConsumerWidget {
-  const _MenuGrid({required this.groupId, required this.onAdd});
+  const _MenuGrid({required this.groupId, required this.onAdd, required this.onBack});
   final int groupId;
   final ValueChanged<MenuItemEntity> onAdd;
+  final VoidCallback onBack;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final itemsAsync = ref.watch(menuItemsByGroupProvider(groupId));
-    return itemsAsync.when(
-      loading: () => _shimmerGrid(),
-      error: (e, _) => Center(child: Text('Error: $e')),
-      data: (items) => items.isEmpty
-        ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Icon(Icons.restaurant_menu_rounded, size: 56, color: context.cs.onSurfaceVariant.withAlpha(80)),
-            const SizedBox(height: 12),
-            Text('No items in this group', style: TextStyle(color: context.cs.onSurfaceVariant)),
-          ]))
-        : GridView.builder(
-            padding: const EdgeInsets.all(12),
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 170, childAspectRatio: 0.78,
-              crossAxisSpacing: 10, mainAxisSpacing: 10,
-            ),
-            itemCount: items.length,
-            itemBuilder: (_, i) => _MenuItemCard(item: items[i], onTap: () => onAdd(items[i]))
-              .animate(delay: Duration(milliseconds: i * 25)).fadeIn(duration: 200.ms),
+    return Column(children: [
+      // Back header
+      Container(
+        height: 44,
+        color: context.cardBg,
+        child: Row(children: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new, size: 16),
+            onPressed: onBack,
+            tooltip: 'All categories',
           ),
-    );
+          Text('Categories', style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant)),
+          const SizedBox(width: 8),
+          Icon(Icons.chevron_right, size: 16, color: context.cs.onSurfaceVariant),
+          const SizedBox(width: 8),
+          Text(itemsAsync.valueOrNull != null && itemsAsync.valueOrNull!.isNotEmpty ? itemsAsync.valueOrNull!.first.groupName : '',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: context.cs.primary)),
+          const Spacer(),
+        ]),
+      ),
+      Expanded(child: itemsAsync.when(
+        loading: () => _shimmerGrid(),
+        error: (e, _) => Center(child: Text('Error: $e')),
+        data: (items) => items.isEmpty
+          ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.restaurant_menu_rounded, size: 56, color: context.cs.onSurfaceVariant.withAlpha(80)),
+              const SizedBox(height: 12),
+              Text('No items in this group', style: TextStyle(color: context.cs.onSurfaceVariant)),
+            ]))
+          : GridView.builder(
+              padding: const EdgeInsets.all(12),
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 170, childAspectRatio: 0.78,
+                crossAxisSpacing: 10, mainAxisSpacing: 10,
+              ),
+              itemCount: items.length,
+              itemBuilder: (_, i) => _MenuItemCard(item: items[i], onTap: () => onAdd(items[i]))
+                .animate(delay: Duration(milliseconds: i * 25)).fadeIn(duration: 200.ms),
+            ),
+      )),
+    ]);
   }
 
   Widget _shimmerGrid() => GridView.builder(
@@ -1047,6 +989,82 @@ class _PlaceholderImg extends StatelessWidget {
     color: context.cs.primary.withAlpha(12),
     child: Center(child: Icon(Icons.restaurant_rounded, size: 44, color: context.cs.primary.withAlpha(70))),
   );
+}
+
+class _GroupGrid extends StatelessWidget {
+  const _GroupGrid({required this.groups, required this.onGroupTap, required this.onDealsTap});
+  final List<MenuGroupEntity> groups;
+  final ValueChanged<MenuGroupEntity> onGroupTap;
+  final VoidCallback onDealsTap;
+
+  @override
+  Widget build(BuildContext context) {
+    if (groups.isEmpty) return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+      Icon(Icons.restaurant_menu_rounded, size: 64, color: context.cs.onSurfaceVariant.withAlpha(80)),
+      const SizedBox(height: 12),
+      Text('No menu categories found', style: TextStyle(color: context.cs.onSurfaceVariant)),
+    ]));
+    return GridView.builder(
+      padding: const EdgeInsets.all(16),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 6, childAspectRatio: 0.9, crossAxisSpacing: 10, mainAxisSpacing: 10,
+      ),
+      itemCount: groups.length + 1,
+      itemBuilder: (_, i) {
+        if (i == 0) {
+          // Deals card
+          return GestureDetector(
+            onTap: onDealsTap,
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFFD97706).withAlpha(20),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFFD97706).withAlpha(60)),
+              ),
+              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Icon(Icons.local_offer_rounded, size: 36, color: const Color(0xFFD97706)),
+                const SizedBox(height: 8),
+                Text('Deals', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: const Color(0xFFD97706))),
+              ]),
+            ),
+          );
+        }
+        final g = groups[i - 1];
+        final color = _parseColor(g.colorHex);
+        final hasIcon = g.iconPath.isNotEmpty;
+        return GestureDetector(
+          onTap: () => onGroupTap(g),
+          child: Container(
+            decoration: BoxDecoration(
+              color: color.withAlpha(15),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: color.withAlpha(50)),
+            ),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              hasIcon
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.file(File(AppPaths.resolve(g.iconPath)), width: 48, height: 48, fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Icon(Icons.restaurant_menu_rounded, size: 36, color: color)),
+                  )
+                : Icon(Icons.restaurant_menu_rounded, size: 36, color: color),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Text(g.name, maxLines: 2, textAlign: TextAlign.center, overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color)),
+              ),
+            ]),
+          ),
+        );
+      },
+    );
+  }
+
+  Color _parseColor(String hex) {
+    try { return Color(int.parse(hex.replaceFirst('#', 'FF'), radix: 16)); }
+    catch (_) { return const Color(0xFF1A56DB); }
+  }
 }
 
 class _SearchResults extends ConsumerWidget {
