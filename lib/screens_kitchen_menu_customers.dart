@@ -458,7 +458,7 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
                               style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant, fontStyle: FontStyle.italic)),
                           ]),
                         ),
-                        Expanded(child: _MenuItemsGrid(groupId: _selectedGroupId!, onEdit: _showEditItemDialog)),
+                        Expanded(child: _MenuItemsGrid(groupId: _selectedGroupId!, onEdit: _showEditItemDialog, onDeleted: _loadGroups)),
                       ]),
                 ),
               ]),
@@ -699,9 +699,10 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
 }
 
 class _MenuItemsGrid extends ConsumerWidget {
-  const _MenuItemsGrid({required this.groupId, required this.onEdit});
+  const _MenuItemsGrid({required this.groupId, required this.onEdit, required this.onDeleted});
   final int groupId;
   final ValueChanged<MenuItemEntity> onEdit;
+  final VoidCallback onDeleted;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -723,7 +724,7 @@ class _MenuItemsGrid extends ConsumerWidget {
           itemBuilder: (_, i) {
             final r = rows[i];
             final item = mapMenuItemRow(r, '');
-            return _ManageItemCard(item: item, ref: ref, onEdit: () => onEdit(item));
+            return _ManageItemCard(item: item, ref: ref, onEdit: () => onEdit(item), onDeleted: onDeleted);
           },
         );
       },
@@ -732,8 +733,8 @@ class _MenuItemsGrid extends ConsumerWidget {
 }
 
 class _ManageItemCard extends StatelessWidget {
-  const _ManageItemCard({required this.item, required this.ref, required this.onEdit});
-  final MenuItemEntity item; final WidgetRef ref; final VoidCallback onEdit;
+  const _ManageItemCard({required this.item, required this.ref, required this.onEdit, required this.onDeleted});
+  final MenuItemEntity item; final WidgetRef ref; final VoidCallback onEdit; final VoidCallback onDeleted;
 
   @override
   Widget build(BuildContext context) {
@@ -786,6 +787,17 @@ class _ManageItemCard extends StatelessWidget {
               GestureDetector(
                 onTap: onEdit,
                 child: Icon(Icons.edit_rounded, size: 16, color: context.cs.primary),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: () async {
+                  final ok = await confirm(context, 'Delete item?', 'Remove "${item.name}" from menu? This cannot be undone.', danger: true);
+                  if (ok) {
+                    await ref.read(dbProvider).menuDao.deleteItem(item.id);
+                    onDeleted();
+                  }
+                },
+                child: Icon(Icons.delete_rounded, size: 16, color: Colors.red.shade400),
               ),
             ]),
           ]),

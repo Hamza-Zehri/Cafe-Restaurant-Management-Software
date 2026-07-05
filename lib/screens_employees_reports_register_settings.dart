@@ -1120,9 +1120,9 @@ class _ExpenseTrackerScreenState extends ConsumerState<ExpenseTrackerScreen> {
       setState(() => _range = DateTimeRange(
         start: picked.start,
         end: picked.end.add(const Duration(hours: 23, minutes: 59)),
-      ));
-    }
+    ));
   }
+}
 
   void _showAddExpenseDialog() {
     final amountCtrl = TextEditingController();
@@ -1544,6 +1544,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     (Icons.palette_outlined, 'Theme'),
     (Icons.backup_outlined, 'Backup'),
     (Icons.people_outlined, 'User Accounts'),
+    (Icons.info_outline, 'About'),
   ];
 
   @override
@@ -1593,6 +1594,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _ThemeSettings(),
           _BackupSettings(),
           _UserAccountsSettings(),
+          _AboutSettings(),
         ][_section]),
       ]),
     ));
@@ -2070,5 +2072,57 @@ class _UserAccountsSettings extends ConsumerWidget {
         ),
       ],
     ));
+  }
+}
+
+class _AboutSettings extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('About', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
+        const SizedBox(height: 24),
+        AppCard(
+          child: Column(children: [
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(13)),
+              child: Image.asset('assets/images/logo.png', height: 120, width: double.infinity, fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => Container(
+                  height: 120, color: cs.primary.withAlpha(15),
+                  child: Icon(Icons.restaurant, size: 48, color: cs.primary)),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(children: [
+                const Text('Restaurant POS', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 4),
+                Text('Version 2.0.0', style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+                const Divider(height: 32),
+                _infoRow(cs, 'Developer', 'Engr. Hamza Asad'),
+                const SizedBox(height: 8),
+                _infoRow(cs, 'Contact', 'WhatsApp: 03357981318'),
+                const SizedBox(height: 8),
+                _infoRow(cs, 'Email', 'Hamzazehri2472@gmail.com'),
+                const SizedBox(height: 8),
+                _infoRow(cs, 'License', 'Licensed — All Rights Reserved'),
+                const Divider(height: 32),
+                Text('© 2024 Engr. Hamza Asad. All rights reserved.',
+                  style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant, fontStyle: FontStyle.italic)),
+              ]),
+            ),
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  Widget _infoRow(ColorScheme cs, String label, String value) {
+    return Row(children: [
+      SizedBox(width: 100, child: Text(label, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: cs.onSurfaceVariant))),
+      Expanded(child: Text(value, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13))),
+    ]);
   }
 }
