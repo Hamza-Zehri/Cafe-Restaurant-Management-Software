@@ -505,6 +505,7 @@ class _POSScreenState extends ConsumerState<POSScreen> {
               ],
               onSelected: (v) async {
                 if (v == 'void') await _voidOrder();
+                if (v == 'transfer') await _transferTable();
                 if (v == 'a4' && order != null) _printA4();
               },
             ),
@@ -536,7 +537,7 @@ class _POSScreenState extends ConsumerState<POSScreen> {
             child: _search.isNotEmpty
               ? _SearchResults(search: _search, onAdd: _addItem)
               : _showDeals
-                ? _DealsGrid(onAdd: _addDeal)
+                ? _DealsGrid(onAdd: _addDeal, onBack: () => setState(() => _showDeals = false))
               : _selectedGroupId == null
                 ? _GroupGrid(groups: groups, onGroupTap: (g) => setState(() { _selectedGroupId = g.id; _showDeals = false; }), onDealsTap: () => setState(() => _showDeals = true))
                 : _MenuGrid(groupId: _selectedGroupId!, onAdd: _addItem, onBack: () => setState(() => _selectedGroupId = null)),
@@ -631,14 +632,78 @@ class _POSScreenState extends ConsumerState<POSScreen> {
     if (mounted) showSuccess(context, 'Bill printed');
   }
 
+  Future<void> _transferTable() async {
+    final db = ref.read(dbProvider);
+    final order = ref.read(posProvider(widget.tableId)).valueOrNull;
+    if (order == null) return;
+    final currentTable = await db.tableDao.byId(widget.tableId);
+    if (currentTable == null) return;
+    final tables = await db.tableDao.watchByFloor(currentTable.floorId).first;
+    final available = tables.where((t) => t.id != widget.tableId && (t.status == 'available' || t.status == 'reserved')).toList();
+    if (available.isEmpty) {
+      if (mounted) showError(context, 'No other available tables on this floor');
+      return;
+    }
+    final sel = await showDialog<RestaurantTableRow>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Transfer to table'),
+        content: SizedBox(
+          width: 300, height: 400,
+          child: ListView.builder(
+            itemCount: available.length,
+            itemBuilder: (_, i) {
+              final t = available[i];
+              return ListTile(
+                leading: Icon(t.status == 'available' ? Icons.check_circle_outline : Icons.event_busy,
+                    color: t.status == 'available' ? Colors.green : Colors.orange),
+                title: Text(t.name),
+                subtitle: Text(t.status == 'available' ? 'Available' : 'Reserved'),
+                onTap: () => Navigator.pop(ctx, t),
+              );
+            },
+          ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel'))],
+      ),
+    );
+    if (sel == null || !mounted) return;
+
+    // Update order's tableId
+    await db.orderDao.updateOrder(OrdersCompanion(
+      id: Value(order.id),
+      tableId: Value(sel.id),
+      tableNameCol: Value(sel.name),
+    ));
+    // Free old table
+    await db.tableDao.freeTable(widget.tableId);
+    // Occupy new table
+    await db.tableDao.setStatus(sel.id, 'occupied',
+        orderId: order.id, waiterName: order.waiterName,
+        guestCount: order.guestCount, orderStartTime: order.createdAt);
+    // Navigate to new table POS
+    if (mounted) context.go('/pos/${sel.id}');
+  }
+
   Future<void> _printA4() async {
     final db = ref.read(dbProvider);
     final order = ref.read(posProvider(widget.tableId)).valueOrNull;
     if (order == null) return;
     final invRow = await db.invoiceDao.byOrder(order.id);
-    if (invRow == null) { showError(context, 'No final invoice yet — pay first'); return; }
-    // Build InvoiceEntity from row
-    final inv = _buildInvoiceFromRow(invRow, order);
+    // Proforma A4 if no final invoice exists yet
+    final inv = invRow != null
+        ? _buildInvoiceFromRow(invRow, order)
+        : InvoiceEntity(
+            id: 0, invoiceNumber: 'PROFORMA', orderId: order.id,
+            orderNumber: order.orderNumber, tableName: order.tableName,
+            waiterName: order.waiterName,
+            items: order.activeItems, subtotal: order.subtotal,
+            discountValue: order.discountValue, taxValue: order.taxValue,
+            serviceChargeValue: order.serviceChargeValue,
+            grandTotal: order.grandTotal, amountPaid: 0, changeAmount: 0,
+            paymentMethod: PaymentMethod.cash, status: BillStatus.proforma,
+            createdAt: DateTime.now(), paymentSplits: const [],
+          );
     await PrintService.instance.printA4Invoice(inv);
   }
 
@@ -736,32 +801,52 @@ class _POSScreenState extends ConsumerState<POSScreen> {
 
 // ── Menu Grid ─────────────────────────────────────────
 class _DealsGrid extends ConsumerWidget {
-  const _DealsGrid({required this.onAdd});
+  const _DealsGrid({required this.onAdd, required this.onBack});
   final ValueChanged<DealRow> onAdd;
+  final VoidCallback onBack;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final dealsAsync = ref.watch(activeDealsProvider);
-    return dealsAsync.when(
-      loading: () => _shimmerGrid(context),
-      error: (e, _) => Center(child: Text('Error: $e')),
-      data: (deals) => deals.isEmpty
-        ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Icon(Icons.local_offer_outlined, size: 56, color: context.cs.onSurfaceVariant.withAlpha(80)),
-            const SizedBox(height: 12),
-            Text('No active deals', style: TextStyle(color: context.cs.onSurfaceVariant)),
-          ]))
-        : GridView.builder(
-            padding: const EdgeInsets.all(12),
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 190, childAspectRatio: 0.82,
-              crossAxisSpacing: 10, mainAxisSpacing: 10,
-            ),
-            itemCount: deals.length,
-            itemBuilder: (_, i) => _DealCard(deal: deals[i], onTap: () => onAdd(deals[i]))
-              .animate(delay: Duration(milliseconds: i * 25)).fadeIn(duration: 200.ms),
+    return Column(children: [
+      // Back header
+      Container(
+        height: 44,
+        color: context.cardBg,
+        child: Row(children: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new, size: 16),
+            onPressed: onBack,
+            tooltip: 'All categories',
           ),
-    );
+          Text('Categories', style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant)),
+          const SizedBox(width: 8),
+          Icon(Icons.chevron_right, size: 16, color: context.cs.onSurfaceVariant),
+          const SizedBox(width: 8),
+          Text('Deals', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: const Color(0xFFD97706))),
+        ]),
+      ),
+      Expanded(child: dealsAsync.when(
+        loading: () => _shimmerGrid(context),
+        error: (e, _) => Center(child: Text('Error: $e')),
+        data: (deals) => deals.isEmpty
+          ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.local_offer_outlined, size: 56, color: context.cs.onSurfaceVariant.withAlpha(80)),
+              const SizedBox(height: 12),
+              Text('No active deals', style: TextStyle(color: context.cs.onSurfaceVariant)),
+            ]))
+          : GridView.builder(
+              padding: const EdgeInsets.all(12),
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 190, childAspectRatio: 0.82,
+                crossAxisSpacing: 10, mainAxisSpacing: 10,
+              ),
+              itemCount: deals.length,
+              itemBuilder: (_, i) => _DealCard(deal: deals[i], onTap: () => onAdd(deals[i]))
+                .animate(delay: Duration(milliseconds: i * 25)).fadeIn(duration: 200.ms),
+            ),
+      )),
+    ]);
   }
 
   Widget _shimmerGrid(BuildContext context) => GridView.builder(
@@ -1044,10 +1129,10 @@ class _GroupGrid extends StatelessWidget {
               hasIcon
                 ? ClipRRect(
                     borderRadius: BorderRadius.circular(12),
-                    child: SizedBox(width: 64, height: 64, child: Image.file(File(AppPaths.resolve(g.iconPath)), fit: BoxFit.cover,
+                    child: SizedBox(width: 90, height: 90, child: Image.file(File(AppPaths.resolve(g.iconPath)), fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => Icon(Icons.restaurant_menu_rounded, size: 48, color: color))),
                   )
-                : Icon(Icons.restaurant_menu_rounded, size: 48, color: color),
+                : Icon(Icons.restaurant_menu_rounded, size: 64, color: color),
               const SizedBox(height: 6),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6),

@@ -2109,7 +2109,7 @@ class _AboutSettings extends StatelessWidget {
                 const SizedBox(height: 8),
                 _infoRow(cs, 'License', 'Licensed — All Rights Reserved'),
                 const Divider(height: 32),
-                Text('© 2024 Engr. Hamza Asad. All rights reserved.',
+                Text('© 2026 Engr. Hamza Asad. All rights reserved.',
                   style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant, fontStyle: FontStyle.italic)),
               ]),
             ),

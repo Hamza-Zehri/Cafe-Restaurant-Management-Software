@@ -11,6 +11,7 @@ import 'package:printing/printing.dart';
 import 'package:intl/intl.dart';
 
 import '../domain/entities.dart';
+import 'utils/app_paths.dart';
 
 class PrintService {
   static final PrintService instance = PrintService._();
@@ -37,10 +38,13 @@ class PrintService {
     );
   }
 
+  static pw.Font get bold => pw.Font.helveticaBold();
+  static pw.Font get regular => pw.Font.helvetica();
+
   Future<Uint8List> _buildKitchenPDF(OrderEntity order, List<OrderItemEntity> items) async {
     final pdf = pw.Document();
-    final font = await PdfGoogleFonts.nunitoBold();
-    final fontReg = await PdfGoogleFonts.nunitoRegular();
+    final font = bold;
+    final fontReg = regular;
 
     pdf.addPage(pw.Page(
       pageFormat: PdfPageFormat(_mmToPt(80), double.infinity, marginAll: _mmToPt(3)),
@@ -144,17 +148,17 @@ class PrintService {
   }
 
   // ── X Report ─────────────────────────────────────
-  Future<void> printXReport(CashRegisterEntity reg) async {
+  Future<void> printXReport(CashRegisterEntity reg, {List<_OrderDetail>? soldItems}) async {
     await Printing.layoutPdf(
-      onLayout: (fmt) => _buildXReportPDF(reg),
+      onLayout: (fmt) => _buildXReportPDF(reg, soldItems: soldItems),
       name: 'X-Report',
     );
   }
 
   // ── Z Report ─────────────────────────────────────
-  Future<void> printZReport(CashRegisterEntity reg, double closingCash) async {
+  Future<void> printZReport(CashRegisterEntity reg, double closingCash, {List<_OrderDetail>? soldItems}) async {
     await Printing.layoutPdf(
-      onLayout: (fmt) => _buildZReportPDF(reg, closingCash),
+      onLayout: (fmt) => _buildZReportPDF(reg, closingCash, soldItems: soldItems),
       name: 'Z-Report',
     );
   }
@@ -162,8 +166,8 @@ class PrintService {
   // ── Internal: Bill PDF ────────────────────────────
   Future<Uint8List> _buildBillPDF(OrderEntity order, {required bool isProforma, required PdfPageFormat format}) async {
     final pdf = pw.Document();
-    final font = await PdfGoogleFonts.nunitoBold();
-    final fontReg = await PdfGoogleFonts.nunitoRegular();
+    final font = bold;
+    final fontReg = regular;
     final is80mm = _settings.receiptWidth == 80;
     final width = _mmToPt(is80mm ? 80.0 : 58.0);
 
@@ -178,7 +182,7 @@ class PrintService {
             pw.Center(
               child: pw.Padding(
                 padding: const pw.EdgeInsets.only(bottom: 6),
-                child: pw.Image(logoImg, width: 50, height: 50, fit: pw.BoxFit.contain),
+                  child: pw.Image(logoImg, width: 65, height: 65, fit: pw.BoxFit.contain),
               ),
             ),
           pw.Center(child: pw.Text(_settings.name,
@@ -265,8 +269,8 @@ class PrintService {
   // ── Internal: Receipt PDF ─────────────────────────
   Future<Uint8List> _buildReceiptPDF(InvoiceEntity inv, {required PdfPageFormat format}) async {
     final pdf = pw.Document();
-    final font = await PdfGoogleFonts.nunitoBold();
-    final fontReg = await PdfGoogleFonts.nunitoRegular();
+    final font = bold;
+    final fontReg = regular;
     final width = _mmToPt(_settings.receiptWidth.toDouble());
 
     final logoImg = await _getLogoImage();
@@ -279,7 +283,7 @@ class PrintService {
             pw.Center(
               child: pw.Padding(
                 padding: const pw.EdgeInsets.only(bottom: 6),
-                child: pw.Image(logoImg, width: 50, height: 50, fit: pw.BoxFit.contain),
+                  child: pw.Image(logoImg, width: 65, height: 65, fit: pw.BoxFit.contain),
               ),
             ),
           pw.Center(child: pw.Text(_settings.name, style: pw.TextStyle(font: font, fontSize: 14))),
@@ -342,8 +346,8 @@ class PrintService {
   // ── Internal: A4 Invoice PDF ──────────────────────
   Future<Uint8List> _buildA4PDF(InvoiceEntity inv, {required PdfPageFormat format}) async {
     final pdf = pw.Document();
-    final font = await PdfGoogleFonts.nunitoBold();
-    final fontReg = await PdfGoogleFonts.nunitoRegular();
+    final font = bold;
+    final fontReg = regular;
 
     final logoImg = await _getLogoImage();
     pdf.addPage(pw.Page(
@@ -358,7 +362,7 @@ class PrintService {
               if (logoImg != null)
                 pw.Padding(
                   padding: const pw.EdgeInsets.only(right: 12),
-                  child: pw.Image(logoImg, width: 60, height: 60, fit: pw.BoxFit.contain),
+                  child: pw.Image(logoImg, width: 75, height: 75, fit: pw.BoxFit.contain),
                 ),
               pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
                 pw.Text(_settings.name, style: pw.TextStyle(font: font, fontSize: 24, color: PdfColors.blue900)),
@@ -448,14 +452,22 @@ class PrintService {
   }
 
   // ── X Report PDF ──────────────────────────────────
-  Future<Uint8List> _buildXReportPDF(CashRegisterEntity reg) async {
+  Future<Uint8List> _buildXReportPDF(CashRegisterEntity reg, {List<_OrderDetail>? soldItems}) async {
     final pdf = pw.Document();
-    final font = await PdfGoogleFonts.nunitoBold();
-    final fontReg = await PdfGoogleFonts.nunitoRegular();
+    final font = bold;
+    final fontReg = regular;
+    final logoImg = await _getLogoImage();
 
     pdf.addPage(pw.Page(
       pageFormat: PdfPageFormat(_mmToPt(80), double.infinity, marginAll: _mmToPt(4)),
       build: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+        if (logoImg != null)
+          pw.Center(
+            child: pw.Padding(
+              padding: const pw.EdgeInsets.only(bottom: 4),
+              child: pw.Image(logoImg, width: 40, height: 40, fit: pw.BoxFit.contain),
+            ),
+          ),
         pw.Center(child: pw.Text(_settings.name, style: pw.TextStyle(font: font, fontSize: 12))),
         pw.Center(child: pw.Text('X REPORT — CURRENT SHIFT', style: pw.TextStyle(font: font, fontSize: 11))),
         pw.Center(child: pw.Text('(NO RESET)', style: pw.TextStyle(font: fontReg, fontSize: 9, color: PdfColors.grey600))),
@@ -487,6 +499,36 @@ class PrintService {
         _rptRow('Cash out', '${_settings.currencySymbol} ${reg.cashOut.toStringAsFixed(0)}', font, fontReg),
         _rptRow('Expected cash', '${_settings.currencySymbol} ${reg.expectedCash.toStringAsFixed(0)}', font, fontReg),
         pw.Divider(),
+        // Per-order items
+        if (soldItems != null && soldItems.isNotEmpty) ...[
+          pw.Text('ORDERED ITEMS', style: pw.TextStyle(font: font, fontSize: 10)),
+          pw.SizedBox(height: 4),
+          ...soldItems.expand((order) => [
+            pw.Padding(
+              padding: const pw.EdgeInsets.only(top: 4),
+              child: pw.Row(children: [
+                pw.Text('#${order.orderNumber}', style: pw.TextStyle(font: font, fontSize: 9)),
+                pw.SizedBox(width: 6),
+                pw.Text(order.tableName, style: pw.TextStyle(font: fontReg, fontSize: 8, color: PdfColors.grey600)),
+                pw.Spacer(),
+                pw.Text('${_settings.currencySymbol} ${order.total.toStringAsFixed(0)}',
+                    style: pw.TextStyle(font: font, fontSize: 9)),
+              ]),
+            ),
+            ...order.items.map((item) => pw.Padding(
+              padding: const pw.EdgeInsets.only(left: 12, bottom: 1),
+              child: pw.Row(children: [
+                pw.Expanded(child: pw.Text(item.name, style: pw.TextStyle(font: fontReg, fontSize: 8))),
+                pw.Text('×${item.qty}', style: pw.TextStyle(font: fontReg, fontSize: 8)),
+                pw.SizedBox(width: 6),
+                pw.SizedBox(width: 50, child: pw.Text(
+                    '${_settings.currencySymbol} ${(item.price * item.qty).toStringAsFixed(0)}',
+                    textAlign: pw.TextAlign.right, style: pw.TextStyle(font: fontReg, fontSize: 8))),
+              ]),
+            )),
+          ]),
+          pw.Divider(),
+        ],
         pw.Center(child: pw.Text('— End of X Report —', style: pw.TextStyle(font: fontReg, fontSize: 9))),
       ]),
     ));
@@ -494,15 +536,23 @@ class PrintService {
   }
 
   // ── Z Report PDF ──────────────────────────────────
-  Future<Uint8List> _buildZReportPDF(CashRegisterEntity reg, double closingCash) async {
+  Future<Uint8List> _buildZReportPDF(CashRegisterEntity reg, double closingCash, {List<_OrderDetail>? soldItems}) async {
     final pdf = pw.Document();
-    final font = await PdfGoogleFonts.nunitoBold();
-    final fontReg = await PdfGoogleFonts.nunitoRegular();
+    final font = bold;
+    final fontReg = regular;
     final diff = closingCash - reg.expectedCash;
+    final logoImg = await _getLogoImage();
 
     pdf.addPage(pw.Page(
       pageFormat: PdfPageFormat(_mmToPt(80), double.infinity, marginAll: _mmToPt(4)),
       build: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+        if (logoImg != null)
+          pw.Center(
+            child: pw.Padding(
+              padding: const pw.EdgeInsets.only(bottom: 4),
+              child: pw.Image(logoImg, width: 40, height: 40, fit: pw.BoxFit.contain),
+            ),
+          ),
         pw.Center(child: pw.Text(_settings.name, style: pw.TextStyle(font: font, fontSize: 12))),
         pw.Center(child: pw.Text('Z REPORT — END OF DAY', style: pw.TextStyle(font: font, fontSize: 11))),
         pw.Center(child: pw.Text('*** SHIFT CLOSED ***', style: pw.TextStyle(font: font, fontSize: 10, color: PdfColors.red700))),
@@ -543,6 +593,36 @@ class PrintService {
         pw.Text('KITCHEN', style: pw.TextStyle(font: font, fontSize: 10)),
         _rptRow('Kitchen tickets printed', '${reg.totalKitchenTickets}', font, fontReg),
         _rptRow('Void transactions', '${reg.totalVoids}', font, fontReg),
+        pw.Divider(),
+        if (soldItems != null && soldItems.isNotEmpty) ...[
+          pw.Text('ORDERED ITEMS', style: pw.TextStyle(font: font, fontSize: 10)),
+          pw.SizedBox(height: 4),
+          ...soldItems.expand((order) => [
+            pw.Padding(
+              padding: const pw.EdgeInsets.only(top: 4),
+              child: pw.Row(children: [
+                pw.Text('#${order.orderNumber}', style: pw.TextStyle(font: font, fontSize: 9)),
+                pw.SizedBox(width: 6),
+                pw.Text(order.tableName, style: pw.TextStyle(font: fontReg, fontSize: 8, color: PdfColors.grey600)),
+                pw.Spacer(),
+                pw.Text('${_settings.currencySymbol} ${order.total.toStringAsFixed(0)}',
+                    style: pw.TextStyle(font: font, fontSize: 9)),
+              ]),
+            ),
+            ...order.items.map((item) => pw.Padding(
+              padding: const pw.EdgeInsets.only(left: 12, bottom: 1),
+              child: pw.Row(children: [
+                pw.Expanded(child: pw.Text(item.name, style: pw.TextStyle(font: fontReg, fontSize: 8))),
+                pw.Text('×${item.qty}', style: pw.TextStyle(font: fontReg, fontSize: 8)),
+                pw.SizedBox(width: 6),
+                pw.SizedBox(width: 50, child: pw.Text(
+                    '${_settings.currencySymbol} ${(item.price * item.qty).toStringAsFixed(0)}',
+                    textAlign: pw.TextAlign.right, style: pw.TextStyle(font: fontReg, fontSize: 8))),
+              ]),
+            )),
+          ]),
+          pw.Divider(),
+        ],
         pw.Divider(thickness: 1),
         pw.Center(child: pw.Text('*** END OF DAY — COUNTERS RESET ***', style: pw.TextStyle(font: font, fontSize: 9, color: PdfColors.red700))),
         pw.Center(child: pw.Text(_df.format(DateTime.now()), style: pw.TextStyle(font: fontReg, fontSize: 8))),
@@ -553,7 +633,8 @@ class PrintService {
 
   Future<pw.MemoryImage?> _getLogoImage() async {
     if (_settings.logoPath != null && _settings.logoPath!.isNotEmpty) {
-      final file = File(_settings.logoPath!);
+      final resolvedPath = AppPaths.resolve(_settings.logoPath!);
+      final file = File(resolvedPath);
       if (file.existsSync()) {
         try {
           final bytes = file.readAsBytesSync();
@@ -615,4 +696,19 @@ class PrintService {
     final m = d.inMinutes % 60;
     return '${h}h ${m}m';
   }
+}
+
+class _OrderDetail {
+  final String tableName;
+  final String orderNumber;
+  final List<_OrderItemDetail> items;
+  final double total;
+  const _OrderDetail({required this.tableName, required this.orderNumber, required this.items, required this.total});
+}
+
+class _OrderItemDetail {
+  final String name;
+  final int qty;
+  final double price;
+  const _OrderItemDetail({required this.name, required this.qty, required this.price});
 }
