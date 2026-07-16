@@ -1806,6 +1806,7 @@ class _ThemeSettings extends ConsumerWidget {
 class _BackupSettings extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(settingsProvider);
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1986,6 +1987,62 @@ class _BackupSettings extends ConsumerWidget {
             ),
           ],
         ),
+        const SizedBox(height: 24),
+
+        // ── Auto Backup Settings ──────────────────────────
+        AppCard(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(
+              children: [
+                Icon(Icons.schedule, color: context.cs.primary, size: 24),
+                const SizedBox(width: 10),
+                const Text('Automatic Daily Backup', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'A backup is created automatically every day when you open the app.',
+              style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 13, height: 1.4),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Text('Destination folder:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: context.cs.onSurfaceVariant)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: context.cs.surfaceContainerHighest.withAlpha(80),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: context.cs.outlineVariant),
+                    ),
+                    child: Text(
+                      settings.autoBackupDestFolder.isEmpty ? AppPaths.backupsDir : settings.autoBackupDestFolder,
+                      style: TextStyle(fontSize: 12, fontFamily: 'monospace', color: context.cs.onSurfaceVariant),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.folder_open, size: 16),
+                  label: const Text('Change'),
+                  onPressed: () async {
+                    final dir = await FilePicker.platform.getDirectoryPath(
+                      dialogTitle: 'Select Auto-Backup Folder',
+                    );
+                    if (dir != null) {
+                      final updated = settings.copyWith(autoBackupDestFolder: dir);
+                      await ref.read(settingsProvider.notifier).save(updated);
+                      if (context.mounted) showSuccess(context, 'Backup folder updated');
+                    }
+                  },
+                ),
+              ],
+            ),
+          ]),
+        ),
       ]),
     );
   }
@@ -2075,7 +2132,35 @@ class _UserAccountsSettings extends ConsumerWidget {
   }
 }
 
-class _AboutSettings extends StatelessWidget {
+class _AboutSettings extends ConsumerStatefulWidget {
+  @override
+  ConsumerState<_AboutSettings> createState() => _AboutSettingsState();
+}
+
+class _AboutSettingsState extends ConsumerState<_AboutSettings> {
+  String _licenseText = 'Checking...';
+  bool _licOk = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _check();
+  }
+
+  Future<void> _check() async {
+    final status = await LicenseService.validateLicense();
+    if (!mounted) return;
+    if (status == LicenseStatus.valid) {
+      setState(() { _licenseText = 'Activated — Licensed'; _licOk = true; });
+    } else if (status == LicenseStatus.trial) {
+      final days = await LicenseService.getTrialDaysLeft();
+      if (!mounted) return;
+      setState(() { _licenseText = 'Trial — $days day${days == 1 ? '' : 's'} left'; _licOk = true; });
+    } else {
+      setState(() { _licenseText = 'Not Activated'; _licOk = false; });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -2107,7 +2192,14 @@ class _AboutSettings extends StatelessWidget {
                 const SizedBox(height: 8),
                 _infoRow(cs, 'Email', 'Hamzazehri2472@gmail.com'),
                 const SizedBox(height: 8),
-                _infoRow(cs, 'License', 'Licensed — All Rights Reserved'),
+                Row(children: [
+                  SizedBox(width: 100, child: Text('License', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: cs.onSurfaceVariant))),
+                  Icon(_licOk ? Icons.check_circle : Icons.info_outline,
+                    size: 16, color: _licOk ? Colors.green : Colors.orange),
+                  const SizedBox(width: 6),
+                  Expanded(child: Text(_licenseText, style: TextStyle(fontWeight: FontWeight.w500, fontSize: 13,
+                    color: _licOk ? Colors.green : Colors.orange))),
+                ]),
                 const Divider(height: 32),
                 Text('© 2026 Engr. Hamza Asad. All rights reserved.',
                   style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant, fontStyle: FontStyle.italic)),

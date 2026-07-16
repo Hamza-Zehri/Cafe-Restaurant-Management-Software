@@ -43,11 +43,7 @@ part 'screens_setup.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppPaths.init();
-  try {
-    await BackupService.createDailyBackupIfNeeded();
-  } catch (_) {
-    // Backup should never prevent the app from opening.
-  }
+  await LicenseService.init();
   await windowManager.ensureInitialized();
   await windowManager.waitUntilReadyToShow(
     const WindowOptions(
@@ -78,11 +74,12 @@ class RestaurantPOSApp extends ConsumerWidget {
         final loc = state.matchedLocation;
         // Allowed unauthenticated routes
         if (loc == '/splash' || loc == '/setup' || loc == '/activation') return null;
-        
+
         final loggedIn = auth.isLoggedIn;
         final onLogin = loc == '/login';
-        
-        if (!loggedIn && !onLogin) return '/login';
+
+        // Not logged in → go through splash so license is checked
+        if (!loggedIn && !onLogin) return '/splash';
         if (loggedIn && onLogin) return '/dashboard';
         return null;
       },
@@ -605,6 +602,9 @@ class DashboardScreen extends ConsumerWidget {
         SliverPadding(
           padding: const EdgeInsets.all(20),
           sliver: SliverList(delegate: SliverChildListDelegate([
+            // ── Trial Banner ─────────────────────────
+            _TrialBanner(),
+            const SizedBox(height: 12),
             // ── KPI Row ──────────────────────────────
             _KPIRow(tables: tables, orders: orders, register: register),
             const SizedBox(height: 20),
@@ -623,6 +623,71 @@ class DashboardScreen extends ConsumerWidget {
         ),
       ]),
     ));
+  }
+}
+
+class _TrialBanner extends ConsumerStatefulWidget {
+  @override
+  _TrialBannerState createState() => _TrialBannerState();
+}
+
+class _TrialBannerState extends ConsumerState<_TrialBanner> {
+  LicenseStatus? _status;
+  int? _daysLeft;
+  bool _loaded = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final status = await LicenseService.validateLicense();
+    final daysLeft = await LicenseService.getTrialDaysLeft();
+    if (mounted) setState(() { _status = status; _daysLeft = daysLeft; _loaded = true; });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_loaded || _status != LicenseStatus.trial || _daysLeft == null) return const SizedBox.shrink();
+
+    final urgent = _daysLeft! <= 2;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: urgent ? Colors.red.shade50 : Colors.amber.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: urgent ? Colors.red.shade300 : Colors.amber.shade300),
+      ),
+      child: Row(
+        children: [
+          Icon(urgent ? Icons.warning_amber_rounded : Icons.schedule, color: urgent ? Colors.red.shade700 : Colors.amber.shade700, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Trial mode — $_daysLeft day${_daysLeft == 1 ? '' : 's'} remaining',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: urgent ? Colors.red.shade800 : Colors.amber.shade900,
+              ),
+            ),
+          ),
+          TextButton.icon(
+            icon: const Icon(Icons.vpn_key, size: 14),
+            label: const Text('Activate', style: TextStyle(fontSize: 12)),
+            onPressed: () => context.go('/activation'),
+            style: TextButton.styleFrom(
+              foregroundColor: urgent ? Colors.red.shade800 : Colors.amber.shade900,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

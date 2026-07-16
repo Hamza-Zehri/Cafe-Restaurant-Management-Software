@@ -8,23 +8,38 @@ import 'package:pointycastle/export.dart';
 import 'package:pointycastle/padded_block_cipher/padded_block_cipher_impl.dart';
 import 'package:path/path.dart' as p;
 
-import 'app_paths.dart';
+import 'package:path_provider/path_provider.dart';
 
-enum LicenseStatus { valid, missing, invalid, tampered }
+enum LicenseStatus { valid, missing, invalid, tampered, trial, trialExpired }
 
 class LicenseService {
   static const _licenseFileName = 'license.dat';
+  static const _trialFileName = 'trial.dat';
+  static const _trialDays = 7;
   static const _base32Alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
   static const _saltParts = ['rp', 'os', '-v2', ':', 'hamza', ':', 'license'];
+  static String? _licenseDir;
+
+  static Future<void> init() async {
+    final sup = await getApplicationSupportDirectory();
+    _licenseDir = p.join(sup.path, 'sysdata').replaceAll('\\', '/');
+    await Directory(_licenseDir!).create(recursive: true);
+    await _hidePath(_licenseDir!);
+  }
+
+  static Future<void> _hidePath(String path) async {
+    if (!Platform.isWindows) return;
+    try { await Process.run('attrib', ['+h', path]); } catch (_) {}
+  }
 
   // Replace this generated development public key with your production public key
   // from `dart run tools/generate_keypair.dart` before shipping customer builds.
   static final BigInt _publicModulus = BigInt.parse(
-    '27230062007030923542503967458168672030095952487365775330480505915111549161143012401705422983059285621566877085978508000522861950181330988091832332106884710780479910147872444380622644087866205568382944714089323514330765495262575860125211688071136160607423294409294640552531514778889485193120357431889071669359588913699438549939045290087726966245986319694397532567624176240226281694987344524605625806532518756857451089427910257446783854380568302976898572797471350667293556976112454571249575855010990577191139254484517589079623414262203536634550948730587156778269033163404233070689127251035266178723898372671394969250497',
+    '18312461388406904034054358789206088085267195463515078393180730391506675075672945613359307431086630752687476936798697616725977778464939130198127261074540138210247132567195247815956882972353628096967910372555117842053595185311791525609587923967117443979539848185075656509444244715718352227626981636836673447277288575779125565064948612199285885839230628388530758426046829835224784504838757926846903011385362401339178472808491549916700031517068059324528222893792792617580288289637288788102667960105074116702071851677963829872146235232448431704154652260705173353514996691830416660081198848131677568297275219427532387976513',
   );
   static final BigInt _publicExponent = BigInt.from(65537);
 
-  static String get _licensePath => p.join(AppPaths.baseDir, _licenseFileName);
+  static String get _licensePath => p.join(_licenseDir!, _licenseFileName);
   static String get _salt => _saltParts.join();
 
   static Future<String> getMachineId() async {
@@ -53,42 +68,83 @@ class LicenseService {
   }
 
   static Future<LicenseStatus> validateLicense() async {
+    // Check if activated
     final file = File(_licensePath);
-    if (!await file.exists()) return LicenseStatus.missing;
+    if (await file.exists()) {
+      try {
+        final package = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+        final payload = package['payload'] as String?;
+        final hmacValue = package['hmac'] as String?;
+        if (payload == null || hmacValue == null) return LicenseStatus.tampered;
 
-    try {
-      final package = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
-      final payload = package['payload'] as String?;
-      final hmacValue = package['hmac'] as String?;
-      if (payload == null || hmacValue == null) return LicenseStatus.tampered;
+        final machineId = await getMachineId();
+        final keys = _deriveKeys(machineId);
+        final expectedHmac = _hmacHex(base64Decode(payload), keys.hmacKey);
+        if (!_constantTimeEquals(expectedHmac, hmacValue)) return LicenseStatus.tampered;
 
-      final machineId = await getMachineId();
-      final keys = _deriveKeys(machineId);
-      final expectedHmac = _hmacHex(base64Decode(payload), keys.hmacKey);
-      if (!_constantTimeEquals(expectedHmac, hmacValue)) return LicenseStatus.tampered;
+        final plain = _decrypt(base64Decode(payload), keys.aesKey, keys.iv);
+        final data = jsonDecode(utf8.decode(plain)) as Map<String, dynamic>;
+        final storedMachineId = data['machineId'] as String?;
+        final activationKey = data['activationKey'] as String?;
+        final timestamp = data['timestamp'] as String?;
+        final checksum = data['checksum'] as String?;
 
-      final plain = _decrypt(base64Decode(payload), keys.aesKey, keys.iv);
-      final data = jsonDecode(utf8.decode(plain)) as Map<String, dynamic>;
-      final storedMachineId = data['machineId'] as String?;
-      final activationKey = data['activationKey'] as String?;
-      final timestamp = data['timestamp'] as String?;
-      final checksum = data['checksum'] as String?;
+        if (storedMachineId == null || activationKey == null || timestamp == null || checksum == null) {
+          return LicenseStatus.tampered;
+        }
+        if (storedMachineId != machineId) return LicenseStatus.invalid;
 
-      if (storedMachineId == null || activationKey == null || timestamp == null || checksum == null) {
+        final expectedChecksum = sha256.convert(utf8.encode('$storedMachineId$activationKey$timestamp')).toString();
+        if (!_constantTimeEquals(expectedChecksum, checksum)) return LicenseStatus.tampered;
+
+        return verifyActivationKey(machineId, activationKey)
+            ? LicenseStatus.valid
+            : LicenseStatus.invalid;
+      } catch (_) {
         return LicenseStatus.tampered;
       }
-      if (storedMachineId != machineId) return LicenseStatus.invalid;
+    }
 
-      final expectedChecksum = sha256.convert(utf8.encode('$storedMachineId$activationKey$timestamp')).toString();
-      if (!_constantTimeEquals(expectedChecksum, checksum)) return LicenseStatus.tampered;
+    // No license file — check trial
+    return _evalTrial();
+  }
 
-      return verifyActivationKey(machineId, activationKey)
-          ? LicenseStatus.valid
-          : LicenseStatus.invalid;
+  static Future<LicenseStatus> _evalTrial() async {
+    final trialFile = File(_trialPath);
+    if (!await trialFile.exists()) return LicenseStatus.missing;
+    try {
+      final startStr = await trialFile.readAsString();
+      final start = DateTime.tryParse(startStr.trim());
+      if (start == null) return LicenseStatus.missing;
+      final daysPassed = DateTime.now().difference(start).inDays;
+      if (daysPassed >= _trialDays) return LicenseStatus.trialExpired;
+      return LicenseStatus.trial;
     } catch (_) {
-      return LicenseStatus.tampered;
+      return LicenseStatus.missing;
     }
   }
+
+  static Future<void> startTrial() async {
+    await Directory(_licenseDir!).create(recursive: true);
+    await File(_trialPath).writeAsString(DateTime.now().toIso8601String());
+    await _hidePath(_trialPath);
+  }
+
+  static Future<int> getTrialDaysLeft() async {
+    final trialFile = File(_trialPath);
+    if (!await trialFile.exists()) return _trialDays;
+    try {
+      final startStr = await trialFile.readAsString();
+      final start = DateTime.tryParse(startStr.trim());
+      if (start == null) return _trialDays;
+      final left = _trialDays - DateTime.now().difference(start).inDays;
+      return left < 0 ? 0 : left;
+    } catch (_) {
+      return _trialDays;
+    }
+  }
+
+  static String get _trialPath => p.join(_licenseDir!, _trialFileName);
 
   static bool verifyActivationKey(String machineId, String activationKey) {
     try {
@@ -114,7 +170,7 @@ class LicenseService {
   }
 
   static Future<void> storeLicense(String machineId, String activationKey) async {
-    await Directory(AppPaths.baseDir).create(recursive: true);
+    await Directory(_licenseDir!).create(recursive: true);
     final timestamp = DateTime.now().toUtc().toIso8601String();
     final data = {
       'machineId': machineId,
@@ -131,6 +187,7 @@ class LicenseService {
       'hmac': _hmacHex(encrypted, keys.hmacKey),
     };
     await File(_licensePath).writeAsString(jsonEncode(package));
+    await _hidePath(_licensePath);
   }
 
   static _LicenseKeys _deriveKeys(String machineId) {

@@ -22,19 +22,27 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
     if (!mounted) return;
 
     final licenseStatus = await LicenseService.validateLicense();
-    if (licenseStatus != LicenseStatus.valid) {
+    // Trial and valid license both allow access; expired trial or others redirect to activation
+    if (licenseStatus != LicenseStatus.valid && licenseStatus != LicenseStatus.trial) {
       if (mounted) context.go('/activation');
       return;
     }
-    
+
+    // Daily auto-backup using user-configured folder
+    try {
+      final settings = ref.read(settingsProvider);
+      await BackupService.createDailyBackupIfNeeded(
+        destDir: settings.autoBackupDestFolder.isEmpty ? null : settings.autoBackupDestFolder,
+      );
+    } catch (_) {}
+
     final initState = ref.read(initProvider);
     if (initState.isLoading) {
-      // If still loading, wait a bit longer (should be very fast though)
       await Future.delayed(const Duration(milliseconds: 500));
     }
-    
+
     if (!mounted) return;
-    
+
     final updatedInitState = ref.read(initProvider);
     if (updatedInitState.hasAdmin) {
       context.go('/login');
@@ -612,11 +620,13 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
   String? _error;
   bool _loading = true;
   bool _activating = false;
+  LicenseStatus? _status;
+  int _trialDaysLeft = 7;
 
   @override
   void initState() {
     super.initState();
-    _loadMachineId();
+    _load();
   }
 
   @override
@@ -625,11 +635,15 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
     super.dispose();
   }
 
-  Future<void> _loadMachineId() async {
+  Future<void> _load() async {
     final id = await LicenseService.getMachineId();
+    final status = await LicenseService.validateLicense();
+    final daysLeft = await LicenseService.getTrialDaysLeft();
     if (!mounted) return;
     setState(() {
       _machineId = id;
+      _status = status;
+      _trialDaysLeft = daysLeft;
       _loading = false;
     });
   }
@@ -662,8 +676,24 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
     context.go(updatedInitState.hasAdmin ? '/login' : '/setup');
   }
 
+  Future<void> _startTrial() async {
+    setState(() => _loading = true);
+    await LicenseService.startTrial();
+    if (!mounted) return;
+    final initState = ref.read(initProvider);
+    if (initState.isLoading) {
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
+    if (!mounted) return;
+    final updatedInitState = ref.read(initProvider);
+    context.go(updatedInitState.hasAdmin ? '/login' : '/setup');
+  }
+
   @override
   Widget build(BuildContext context) {
+    final trialExpired = _status == LicenseStatus.trialExpired;
+    final showTrial = !trialExpired && _status != LicenseStatus.valid;
+
     return Scaffold(
       body: Stack(
         fit: StackFit.expand,
@@ -678,31 +708,25 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
             ),
           ),
           Positioned(
-            top: -130,
-            right: -100,
+            top: -130, right: -100,
             child: Container(
-              width: 420,
-              height: 420,
+              width: 420, height: 420,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: RadialGradient(colors: [
-                  const Color(0xFF1E40AF).withAlpha(70),
-                  Colors.transparent,
+                  const Color(0xFF1E40AF).withAlpha(70), Colors.transparent,
                 ]),
               ),
             ),
           ),
           Positioned(
-            bottom: -150,
-            left: -150,
+            bottom: -150, left: -150,
             child: Container(
-              width: 460,
-              height: 460,
+              width: 460, height: 460,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: RadialGradient(colors: [
-                  const Color(0xFFD97706).withAlpha(45),
-                  Colors.transparent,
+                  const Color(0xFFD97706).withAlpha(45), Colors.transparent,
                 ]),
               ),
             ),
@@ -711,29 +735,23 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(24),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 560),
+                constraints: const BoxConstraints(maxWidth: 540),
                 child: Container(
                   padding: const EdgeInsets.all(28),
                   decoration: BoxDecoration(
                     color: Colors.white.withAlpha(18),
                     borderRadius: BorderRadius.circular(22),
                     border: Border.all(color: Colors.white.withAlpha(45), width: 0.8),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withAlpha(80),
-                        blurRadius: 36,
-                        offset: const Offset(0, 18),
-                      ),
-                    ],
+                    boxShadow: [BoxShadow(color: Colors.black.withAlpha(80), blurRadius: 36, offset: const Offset(0, 18))],
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      // Logo icon
                       Center(
                         child: Container(
-                          width: 74,
-                          height: 74,
+                          width: 74, height: 74,
                           decoration: BoxDecoration(
                             color: const Color(0xFF60A5FA).withAlpha(28),
                             shape: BoxShape.circle,
@@ -743,18 +761,86 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
                         ),
                       ),
                       const SizedBox(height: 18),
-                      const Text(
-                        'Restaurant Management System',
+                      const Text('Restaurant Management System',
                         textAlign: TextAlign.center,
                         style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800),
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Software Activation Required',
+                        trialExpired ? 'Trial Expired — Activate Now' : 'Activate Software',
                         textAlign: TextAlign.center,
                         style: TextStyle(color: Colors.white.withAlpha(190), fontSize: 14, fontWeight: FontWeight.w500),
                       ),
                       const SizedBox(height: 24),
+
+                      // Trial banner
+                      if (showTrial && _trialDaysLeft > 0) ...[
+                        Container(
+                          padding: const EdgeInsets.all(18),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(colors: [
+                              const Color(0xFFD97706).withAlpha(50),
+                              const Color(0xFFF59E0B).withAlpha(20),
+                            ]),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: const Color(0xFFD97706).withAlpha(80)),
+                          ),
+                          child: Column(children: [
+                            const Icon(Icons.timer_outlined, color: Color(0xFFF59E0B), size: 42),
+                            const SizedBox(height: 10),
+                            Text('$TRIAL_DAYS-Day Free Trial',
+                              style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
+                            const SizedBox(height: 6),
+                            Text('$_trialDaysLeft day${_trialDaysLeft == 1 ? '' : 's'} remaining',
+                              style: TextStyle(color: const Color(0xFFFCD34D), fontSize: 14)),
+                            const SizedBox(height: 14),
+                            SizedBox(
+                              width: double.infinity,
+                              child: FilledButton.icon(
+                                onPressed: _loading ? null : _startTrial,
+                                icon: _loading
+                                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                    : const Icon(Icons.play_arrow_rounded),
+                                label: Text(_loading ? 'Starting...' : 'Start Free Trial'),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: const Color(0xFFD97706),
+                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                ),
+                              ),
+                            ),
+                          ]),
+                        ),
+                        const SizedBox(height: 20),
+                        Row(children: [
+                          Expanded(child: Divider(color: Colors.white.withAlpha(50))),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 14),
+                            child: Text('OR', style: TextStyle(color: Colors.white.withAlpha(150))),
+                          ),
+                          Expanded(child: Divider(color: Colors.white.withAlpha(50))),
+                        ]),
+                        const SizedBox(height: 20),
+                      ],
+
+                      // Trial expired message
+                      if (trialExpired)
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.red.withAlpha(30),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.redAccent.withAlpha(80)),
+                          ),
+                          child: const Row(children: [
+                            Icon(Icons.error_outline, color: Colors.redAccent, size: 22),
+                            SizedBox(width: 10),
+                            Expanded(child: Text('Your 7-day trial has ended. Please enter a valid activation key to continue.',
+                              style: TextStyle(color: Colors.white, fontSize: 13))),
+                          ]),
+                        ),
+                      if (trialExpired) const SizedBox(height: 18),
+
+                      // Contact developer
                       Container(
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
@@ -768,13 +854,14 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
                           Text('Engr. Hamza Asad', style: TextStyle(color: Colors.white.withAlpha(215), fontSize: 13)),
                           Text('WhatsApp: 03357981318', style: TextStyle(color: Colors.white.withAlpha(215), fontSize: 13)),
                           const SizedBox(height: 8),
-                          Text(
-                            'Send this Machine ID to the developer to receive your activation key.',
+                          Text('Send this Machine ID below to the developer to receive your activation key.',
                             style: TextStyle(color: Colors.white.withAlpha(170), fontSize: 12),
                           ),
                         ]),
                       ),
-                      const SizedBox(height: 18),
+                        const SizedBox(height: 18),
+
+                      // Machine ID
                       Text('Machine ID', style: TextStyle(color: Colors.white.withAlpha(210), fontWeight: FontWeight.w700, fontSize: 13)),
                       const SizedBox(height: 8),
                       Container(
@@ -786,15 +873,9 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
                         ),
                         child: Row(children: [
                           Expanded(
-                            child: SelectableText(
-                              _machineId,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontFamily: 'monospace',
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 1.2,
-                              ),
+                            child: SelectableText(_machineId,
+                              style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontSize: 16,
+                                fontWeight: FontWeight.w700, letterSpacing: 1.2),
                             ),
                           ),
                           TextButton.icon(
@@ -808,13 +889,15 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
                         ]),
                       ),
                       const SizedBox(height: 16),
+
+                      // Activation key input
                       TextField(
                         controller: _keyCtrl,
                         minLines: 2,
                         maxLines: 4,
                         style: const TextStyle(fontFamily: 'monospace'),
                         decoration: const InputDecoration(
-                          labelText: 'Activation Key',
+                          labelText: 'Activation Key (XXXX-XXXX-XXXX-XXXX)',
                           prefixIcon: Icon(Icons.vpn_key_rounded),
                         ),
                       ),
@@ -855,3 +938,5 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
     );
   }
 }
+
+const TRIAL_DAYS = 7;

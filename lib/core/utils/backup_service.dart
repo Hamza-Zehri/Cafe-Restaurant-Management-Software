@@ -41,18 +41,20 @@ class BackupService {
   }
 
   /// Creates one automatic backup per calendar day and keeps only the newest daily archives.
-  static Future<String?> createDailyBackupIfNeeded() async {
-    await Directory(AppPaths.backupsDir).create(recursive: true);
+  /// [destDir] overrides the default backup directory (AppPaths.backupsDir).
+  static Future<String?> createDailyBackupIfNeeded({String? destDir}) async {
+    final backupDir = (destDir != null && destDir.isNotEmpty) ? destDir : AppPaths.backupsDir;
+    await Directory(backupDir).create(recursive: true);
 
     final dbFile = File(AppPaths.dbPath);
     if (!await dbFile.exists()) {
-      await pruneOldAutomaticBackups();
+      await pruneOldAutomaticBackups(backupDir: backupDir);
       return null;
     }
 
     final today = _dateStamp(DateTime.now());
     final destPath = p.join(
-      AppPaths.backupsDir,
+      backupDir,
       '$_autoBackupPrefix$today.zip',
     );
 
@@ -61,14 +63,16 @@ class BackupService {
       await createBackup(destPath);
     }
 
-    await pruneOldAutomaticBackups();
+    await pruneOldAutomaticBackups(backupDir: backupDir);
     return destPath;
   }
 
   static Future<void> pruneOldAutomaticBackups({
     int keepDays = autoBackupRetentionDays,
+    String? backupDir,
   }) async {
-    final dir = Directory(AppPaths.backupsDir);
+    final dirPath = (backupDir != null && backupDir.isNotEmpty) ? backupDir : AppPaths.backupsDir;
+    final dir = Directory(dirPath);
     if (!await dir.exists()) return;
 
     final backups = dir
