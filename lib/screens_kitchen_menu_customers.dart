@@ -62,6 +62,7 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
               tooltip: 'Refresh',
               onPressed: () => ref.read(kitchenProvider.notifier).refresh()),
           const SizedBox(width: 8),
+          const TopBarActions(),
         ],
       ),
       body: orders.isEmpty
@@ -544,6 +545,7 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
               icon: const Icon(Icons.arrow_back),
               onPressed: () => context.go('/dashboard')),
           title: const Text('Menu Management'),
+          actions: [const TopBarActions()],
           bottom: const TabBar(
             tabs: [
               Tab(text: 'Categories & Items'),
@@ -1353,6 +1355,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
             onPressed: _showAddCustomerDialog,
           ),
           const SizedBox(width: 12),
+          const TopBarActions(),
         ],
       ),
       body: Row(children: [

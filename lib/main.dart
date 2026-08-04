@@ -142,7 +142,6 @@ class SideNav extends ConsumerWidget {
       (Icons.bar_chart_rounded, 'Reports', '/reports'),
       (Icons.receipt_long_rounded, 'Expenses', '/expenses'),
       (Icons.point_of_sale_rounded, 'Register', '/cash-register'),
-      (Icons.settings_rounded, 'Settings', '/settings'),
     ];
 
     return Row(children: [
@@ -185,35 +184,6 @@ class SideNav extends ConsumerWidget {
                 ),
               );
             }).toList()),
-          ),
-          // Full Screen Toggle
-          Tooltip(
-            message: 'Toggle Full Screen',
-            preferBelow: false,
-            child: GestureDetector(
-              onTap: () async {
-                final isFullScreen = await windowManager.isFullScreen();
-                await windowManager.setFullScreen(!isFullScreen);
-              },
-              child: Container(
-                width: 50, height: 44, margin: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                child: Icon(Icons.fullscreen_rounded,
-                    color: Colors.white.withAlpha(150), size: 20),
-              ),
-            ),
-          ),
-          // Theme toggle
-          Tooltip(
-            message: 'Toggle Theme',
-            preferBelow: false,
-            child: GestureDetector(
-              onTap: () => ref.read(themeModeProvider.notifier).toggle(),
-              child: Container(
-                width: 50, height: 44, margin: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                child: Icon(isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-                    color: Colors.white.withAlpha(150), size: 20),
-              ),
-            ),
           ),
           // Close App Button (Exit Terminal)
           Tooltip(
@@ -279,13 +249,76 @@ class SideNav extends ConsumerWidget {
         Text('Role: ${user?.role.name}', style: Theme.of(context).textTheme.bodySmall),
       ]),
       actions: [
-        TextButton(
-          onPressed: () { Navigator.pop(context); ref.read(authProvider.notifier).logout(); },
-          child: const Text('Logout', style: TextStyle(color: Colors.red)),
-        ),
         FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
       ],
     ));
+  }
+}
+
+// ── Top bar quick actions (full screen / theme / logout) ──
+class TopBarActions extends ConsumerWidget {
+  const TopBarActions({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isDark = context.isDark;
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      // Full screen toggle
+      Tooltip(
+        message: 'Toggle Full Screen',
+        child: IconButton(
+          icon: const Icon(Icons.fullscreen_rounded),
+          onPressed: () async {
+            final isFullScreen = await windowManager.isFullScreen();
+            await windowManager.setFullScreen(!isFullScreen);
+          },
+        ),
+      ),
+      // Theme toggle
+      Tooltip(
+        message: 'Toggle Theme',
+        child: IconButton(
+          icon: Icon(isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded),
+          onPressed: () => ref.read(themeModeProvider.notifier).toggle(),
+        ),
+      ),
+      // Settings
+      Tooltip(
+        message: 'Settings',
+        child: IconButton(
+          icon: const Icon(Icons.settings_rounded),
+          onPressed: () => context.go('/settings'),
+        ),
+      ),
+      // Logout
+      Tooltip(
+        message: 'Logout',
+        child: IconButton(
+          icon: const Icon(Icons.logout_rounded),
+          onPressed: () async {
+            final ok = await showDialog<bool>(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: const Text('Logout'),
+                content: const Text('Are you sure you want to log out?'),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                  FilledButton(
+                    style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text('Logout'),
+                  ),
+                ],
+              ),
+            );
+            if (ok == true && context.mounted) {
+              await ref.read(authProvider.notifier).logout();
+              if (context.mounted) context.go('/login');
+            }
+          },
+        ),
+      ),
+    ]);
   }
 }
 
@@ -385,6 +418,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Widget build(BuildContext context) {
     final state = ref.watch(authProvider);
     final isDark = context.isDark;
+    final settings = ref.watch(settingsProvider);
 
     return Scaffold(
       body: Stack(
@@ -412,15 +446,25 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
-                      width: 80, height: 80,
-                      decoration: BoxDecoration(color: Colors.white.withAlpha(30), borderRadius: BorderRadius.circular(20)),
-                      child: const Icon(Icons.restaurant, color: Colors.white, size: 46),
+                      width: 256, height: 256,
+                      decoration: BoxDecoration(color: Colors.white.withAlpha(30), borderRadius: BorderRadius.circular(24)),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(24),
+                        child: settings.logoPath != null && settings.logoPath!.isNotEmpty
+                          ? Image.file(File(AppPaths.resolve(settings.logoPath!)), fit: BoxFit.contain)
+                          : const Icon(Icons.restaurant, color: Colors.white, size: 96),
+                      ),
                     ).animate().scale(duration: 600.ms, curve: Curves.elasticOut),
                     const SizedBox(height: 32),
-                    const Text('Restaurant\nManagement', style: TextStyle(
-                      color: Colors.white, fontSize: 46, fontWeight: FontWeight.w800, height: 1.1,
-                      letterSpacing: -1,
-                    )),
+                    Text(
+                      settings.name.isNotEmpty ? settings.name : 'Restaurant Management',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white, fontSize: 46, fontWeight: FontWeight.w800, height: 1.1,
+                        letterSpacing: -1,
+                      ),
+                    ),
                     const SizedBox(height: 12),
                     Text('Streamlined order management, live table tracking, billing and registers, real-time analytics reports, and employee accounts for modern eateries.',
                       style: TextStyle(color: Colors.white.withAlpha(200), fontSize: 14, height: 1.5, fontWeight: FontWeight.w400)),
@@ -596,6 +640,7 @@ class DashboardScreen extends ConsumerWidget {
                   label: Text('Register Open — ${settings.currencySymbol} ${register.expectedCash.toStringAsFixed(0)}'),
                 ),
               ),
+            const TopBarActions(),
           ],
         ),
 

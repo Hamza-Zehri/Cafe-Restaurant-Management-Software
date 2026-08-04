@@ -35,6 +35,7 @@ class _EmployeesScreenState extends ConsumerState<EmployeesScreen>
             onPressed: _showAddStaffDialog,
           ),
           const SizedBox(width: 12),
+          const TopBarActions(),
         ],
         bottom: TabBar(
           controller: _tab,
@@ -560,6 +561,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
             ),
           ),
           const SizedBox(width: 8),
+          const TopBarActions(),
         ],
         bottom: TabBar(
           controller: _tab,
@@ -1033,6 +1035,7 @@ class _ExpenseTrackerScreenState extends ConsumerState<ExpenseTrackerScreen> {
             onPressed: _showAddExpenseDialog,
           ),
           const SizedBox(width: 12),
+          const TopBarActions(),
         ],
       ),
       body: FutureBuilder<List<ExpenseRow>>(
@@ -1289,6 +1292,7 @@ class _CashRegisterScreenState extends ConsumerState<CashRegisterScreen> {
       appBar: AppBar(
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => context.go('/dashboard')),
         title: const Text('Cash Register'),
+        actions: [const TopBarActions()],
       ),
       body: register == null ? _OpenRegisterView(ctrl: _openCashCtrl, user: user, sym: sym) : _OpenRegisterPanel(register: register, user: user, sym: sym),
     ));
@@ -1554,6 +1558,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       appBar: AppBar(
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => context.go('/dashboard')),
         title: const Text('Settings'),
+        actions: [const TopBarActions()],
       ),
       body: Row(children: [
         // Sidebar
