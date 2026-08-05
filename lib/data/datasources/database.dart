@@ -417,9 +417,14 @@ class OrderDao extends DatabaseAccessor<AppDatabase> with _$OrderDaoMixin {
   Future<void> removeItem(int id) => (delete(orderItems)..where((i) => i.id.equals(id))).go();
   Future<List<OrderRow>> forPeriod(DateTime start, DateTime end) =>
     (select(orders)..where((o) => o.createdAt.isBetweenValues(start, end))..orderBy([(o) => OrderingTerm.desc(o.createdAt)])).get();
-  // Kitchen: orders with pending items
+  // Kitchen: orders sent to the kitchen (not yet paid)
   Future<List<OrderRow>> kitchenPending() =>
-    (select(orders)..where((o) => o.status.isIn(['kitchenSent', 'open']))..orderBy([(o) => OrderingTerm.asc(o.createdAt)])).get();
+    (select(orders)..where((o) => o.status.equals('kitchenSent'))..orderBy([(o) => OrderingTerm.asc(o.createdAt)])).get();
+  // Kitchen: recently paid (done) orders
+  Future<List<OrderRow>> doneToday() =>
+    (select(orders)
+      ..where((o) => o.status.equals('paid') & o.paidAt.isBiggerThanValue(DateTime.now().subtract(const Duration(days: 1))))
+      ..orderBy([(o) => OrderingTerm.desc(o.paidAt)])).get();
 }
 
 @DriftAccessor(tables: [Invoices])

@@ -29,15 +29,10 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final orders = ref.watch(kitchenProvider);
+    final kitchen = ref.watch(kitchenProvider);
+    final active = kitchen.active;
+    final done = kitchen.done;
     final isDark = context.isDark;
-
-    final pending =
-        orders.where((o) => o.status == OrderStatus.kitchenSent).toList();
-    final preparing = orders
-        .where((o) => o.items.any((i) => i.status == OrderItemStatus.preparing))
-        .toList();
-    final ready = orders.where((o) => o.status == OrderStatus.ready).toList();
 
     return SideNav(
         child: Scaffold(
@@ -65,39 +60,80 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
           const TopBarActions(),
         ],
       ),
-      body: orders.isEmpty
-          ? Center(
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.kitchen_rounded,
-                  size: 80, color: context.cs.onSurfaceVariant.withAlpha(60)),
-              const SizedBox(height: 16),
-              Text('Kitchen is clear — no pending orders',
-                  style: TextStyle(
-                      color: context.cs.onSurfaceVariant, fontSize: 16)),
-            ]))
-          : Row(children: [
-              _KitchenColumn(
-                  title: 'New Orders',
-                  color: AppColors.orderOpen,
-                  icon: Icons.fiber_new_rounded,
-                  orders: pending,
-                  ref: ref,
-                  context: context),
-              _KitchenColumn(
-                  title: 'Preparing',
-                  color: AppColors.orderKitchen,
-                  icon: Icons.outdoor_grill_rounded,
-                  orders: preparing,
-                  ref: ref,
-                  context: context),
-              _KitchenColumn(
-                  title: 'Ready to Serve',
-                  color: AppColors.orderReady,
-                  icon: Icons.check_circle_rounded,
-                  orders: ready,
-                  ref: ref,
-                  context: context),
-            ]),
+      body: Column(children: [
+        // Summary bar — total in kitchen vs done
+        Container(
+          height: 58,
+          margin: const EdgeInsets.all(12),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: isDark ? AppColors.darkCard : Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: context.border, width: 0.5),
+          ),
+          child: Row(children: [
+            _KitchenStat(
+              color: AppColors.orderKitchen,
+              icon: Icons.outdoor_grill_rounded,
+              label: 'In Kitchen',
+              value: active.length,
+            ),
+            const SizedBox(width: 16),
+            _KitchenStat(
+              color: AppColors.success,
+              icon: Icons.check_circle_rounded,
+              label: 'Done',
+              value: done.length,
+            ),
+            const Spacer(),
+            Text('Bill paid moves the order to Done',
+                style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+          ]),
+        ),
+        Expanded(
+          child: active.isEmpty && done.isEmpty
+              ? Center(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.kitchen_rounded,
+                      size: 80, color: context.cs.onSurfaceVariant.withAlpha(60)),
+                  const SizedBox(height: 16),
+                  Text('Kitchen is clear — no orders',
+                      style: TextStyle(
+                          color: context.cs.onSurfaceVariant, fontSize: 16)),
+                ]))
+              : ListView(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  children: [
+                    if (active.isNotEmpty) ...[
+                      Row(children: [
+                        Icon(Icons.outdoor_grill_rounded,
+                            size: 16, color: AppColors.orderKitchen),
+                        const SizedBox(width: 6),
+                        Text('In Kitchen (${active.length})',
+                            style: context.tt.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w700)),
+                      ]),
+                      const SizedBox(height: 8),
+                      ...active.map((o) => _KitchenTableCard(order: o)),
+                      const SizedBox(height: 14),
+                    ],
+                    if (done.isNotEmpty) ...[
+                      Row(children: [
+                        Icon(Icons.check_circle_rounded,
+                            size: 16, color: AppColors.success),
+                        const SizedBox(width: 6),
+                        Text('Done (${done.length})',
+                            style: context.tt.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.success)),
+                      ]),
+                      const SizedBox(height: 8),
+                      ...done.map((o) => _DoneTableCard(order: o)),
+                    ],
+                  ],
+                ),
+        ),
+      ]),
     ));
   }
 }
@@ -164,91 +200,62 @@ class _PulseDotState extends State<_PulseDot>
       );
 }
 
-class _KitchenColumn extends StatelessWidget {
-  const _KitchenColumn(
-      {required this.title,
-      required this.color,
+class _KitchenStat extends StatelessWidget {
+  const _KitchenStat(
+      {required this.color,
       required this.icon,
-      required this.orders,
-      required this.ref,
-      required this.context});
-  final String title;
+      required this.label,
+      required this.value});
   final Color color;
   final IconData icon;
-  final List<OrderEntity> orders;
-  final WidgetRef ref;
-  final BuildContext context;
+  final String label;
+  final int value;
 
   @override
-  Widget build(BuildContext innerContext) => Expanded(
-          child: Column(children: [
-        Container(
-          height: 48,
-          margin: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-              color: color.withAlpha(20),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: color.withAlpha(70))),
-          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(icon, color: color, size: 18),
-            const SizedBox(width: 8),
-            Text(title,
-                style: TextStyle(
-                    color: color, fontWeight: FontWeight.w700, fontSize: 14)),
-            if (orders.isNotEmpty) ...[
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                    color: color, borderRadius: BorderRadius.circular(10)),
-                child: Text('${orders.length}',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800)),
-              ),
-            ],
-          ]),
-        ),
-        Expanded(
-            child: ListView.builder(
-          padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-          itemCount: orders.length,
-          itemBuilder: (_, i) =>
-              _KitchenCard(order: orders[i], accentColor: color, ref: ref)
-                  .animate(delay: Duration(milliseconds: i * 40))
-                  .fadeIn()
-                  .slideY(begin: 0.05),
-        )),
-      ]));
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withAlpha(15),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withAlpha(50)),
+      ),
+      child: Row(children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 6),
+        Text(label,
+            style: TextStyle(
+                fontSize: 12, color: color, fontWeight: FontWeight.w700)),
+        const SizedBox(width: 5),
+        Text('$value',
+            style: TextStyle(
+                fontSize: 16, color: color, fontWeight: FontWeight.w800)),
+      ]),
+    );
+  }
 }
 
-class _KitchenCard extends StatefulWidget {
-  const _KitchenCard(
-      {required this.order, required this.accentColor, required this.ref});
+// Read-only card showing one table's order currently in the kitchen.
+class _KitchenTableCard extends StatefulWidget {
+  const _KitchenTableCard({required this.order});
   final OrderEntity order;
-  final Color accentColor;
-  final WidgetRef ref;
+
   @override
-  State<_KitchenCard> createState() => _KitchenCardState();
+  State<_KitchenTableCard> createState() => _KitchenTableCardState();
 }
 
-class _KitchenCardState extends State<_KitchenCard> {
+class _KitchenTableCardState extends State<_KitchenTableCard> {
   late Timer _t;
   late Duration _elapsed;
-  bool _urgent = false;
 
   @override
   void initState() {
     super.initState();
     _elapsed = DateTime.now().difference(widget.order.createdAt);
-    _urgent = _elapsed.inMinutes >= 20;
     _t = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted)
-        setState(() {
-          _elapsed = DateTime.now().difference(widget.order.createdAt);
-          _urgent = _elapsed.inMinutes >= 20;
-        });
+        setState(() =>
+            _elapsed = DateTime.now().difference(widget.order.createdAt));
     });
   }
 
@@ -268,7 +275,8 @@ class _KitchenCardState extends State<_KitchenCard> {
   Widget build(BuildContext context) {
     final o = widget.order;
     final isDark = context.isDark;
-    final color = _urgent ? Colors.red : widget.accentColor;
+    final urgent = _elapsed.inMinutes >= 20;
+    final color = urgent ? Colors.red : AppColors.orderKitchen;
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 400),
@@ -277,9 +285,9 @@ class _KitchenCardState extends State<_KitchenCard> {
         color: isDark ? AppColors.darkCard : Colors.white,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-            color: _urgent ? Colors.red.withAlpha(180) : color.withAlpha(80),
-            width: _urgent ? 2 : 1),
-        boxShadow: _urgent
+            color: urgent ? Colors.red.withAlpha(180) : color.withAlpha(80),
+            width: urgent ? 2 : 1),
+        boxShadow: urgent
             ? [
                 BoxShadow(
                     color: Colors.red.withAlpha(50),
@@ -289,52 +297,40 @@ class _KitchenCardState extends State<_KitchenCard> {
             : null,
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // Card header
+        // Header: table + order number + elapsed
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
             color: color.withAlpha(isDark ? 25 : 18),
             borderRadius: const BorderRadius.vertical(top: Radius.circular(13)),
           ),
           child: Row(children: [
+            Icon(Icons.table_restaurant_rounded, size: 18, color: color),
+            const SizedBox(width: 8),
+            Text(o.tableName,
+                style: TextStyle(
+                    color: color, fontWeight: FontWeight.w800, fontSize: 16)),
+            const SizedBox(width: 10),
             Text('#${o.orderNumber}',
                 style: TextStyle(
-                    color: color, fontWeight: FontWeight.w800, fontSize: 15)),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                  color: color.withAlpha(25),
-                  borderRadius: BorderRadius.circular(6)),
-              child: Text(o.tableName,
-                  style: TextStyle(
-                      color: color, fontSize: 12, fontWeight: FontWeight.w700)),
-            ),
+                    color: color.withAlpha(180),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600)),
             const Spacer(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: _urgent ? Colors.red.withAlpha(20) : Colors.transparent,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Row(children: [
-                Icon(Icons.timer_rounded,
-                    size: 14, color: _urgent ? Colors.red : color),
-                const SizedBox(width: 4),
-                Text(_timeStr,
-                    style: TextStyle(
-                      color: _urgent ? Colors.red : color,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    )),
-              ]),
-            ),
+            Icon(Icons.timer_rounded, size: 14, color: urgent ? Colors.red : color),
+            const SizedBox(width: 4),
+            Text(_timeStr,
+                style: TextStyle(
+                  color: urgent ? Colors.red : color,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                )),
           ]),
         ),
         // Waiter + guests
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
           child: Row(children: [
             Icon(Icons.person_outline,
                 size: 13, color: context.cs.onSurfaceVariant),
@@ -353,152 +349,129 @@ class _KitchenCardState extends State<_KitchenCard> {
         ),
         // Items
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            ...o.items
-                .where((i) => !i.isVoided && i.status != OrderItemStatus.served)
-                .map((item) => Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
+          padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            ...o.items.where((i) => !i.isVoided).map((item) => Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Container(
+                      width: 28, height: 28,
+                      decoration: BoxDecoration(
+                        color: color.withAlpha(25),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: color.withAlpha(60)),
+                      ),
+                      child: Center(
+                          child: Text('×${item.quantity}',
+                              style: TextStyle(
+                                  color: color,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 12))),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                          Text(item.menuItem.name,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w700, fontSize: 13)),
+                          if (item.notes.isNotEmpty)
                             Container(
-                              width: 30,
-                              height: 30,
+                              margin: const EdgeInsets.only(top: 3),
+                              padding: const EdgeInsets.fromLTRB(6, 3, 6, 3),
                               decoration: BoxDecoration(
-                                color: color.withAlpha(25),
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: color.withAlpha(60)),
+                                color: Colors.orange.withAlpha(18),
+                                borderRadius: BorderRadius.circular(4),
+                                border: const Border(
+                                    left: BorderSide(
+                                        color: Colors.orange, width: 3)),
                               ),
-                              child: Center(
-                                  child: Text('×${item.quantity}',
-                                      style: TextStyle(
-                                          color: color,
-                                          fontWeight: FontWeight.w800,
-                                          fontSize: 12))),
+                              child: Text('⚠ ${item.notes}',
+                                  style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.orange,
+                                      fontWeight: FontWeight.w500)),
                             ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                                child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                  Text(item.menuItem.name,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 13)),
-                                  if (item.notes.isNotEmpty)
-                                    Container(
-                                      margin: const EdgeInsets.only(top: 3),
-                                      padding:
-                                          const EdgeInsets.fromLTRB(6, 3, 6, 3),
-                                      decoration: BoxDecoration(
-                                        color: Colors.orange.withAlpha(18),
-                                        borderRadius: BorderRadius.circular(4),
-                                        border: Border(
-                                            left: const BorderSide(
-                                                color: Colors.orange,
-                                                width: 3)),
-                                      ),
-                                      child: Text('⚠ ${item.notes}',
-                                          style: const TextStyle(
-                                              fontSize: 11,
-                                              color: Colors.orange,
-                                              fontWeight: FontWeight.w500)),
-                                    ),
-                                ])),
-                            // Item status toggle
-                            GestureDetector(
-                              onTap: () {
-                                if (item.status == OrderItemStatus.sent) {
-                                  widget.ref
-                                      .read(kitchenProvider.notifier)
-                                      .markItemPreparing(item.id);
-                                } else if (item.status ==
-                                    OrderItemStatus.preparing) {
-                                  widget.ref
-                                      .read(kitchenProvider.notifier)
-                                      .markItemReady(item.id);
-                                }
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: _itemStatusColor(item.status)
-                                      .withAlpha(20),
-                                  borderRadius: BorderRadius.circular(5),
-                                  border: Border.all(
-                                      color: _itemStatusColor(item.status)
-                                          .withAlpha(60)),
-                                ),
-                                child: Text(_itemStatusLabel(item.status),
-                                    style: TextStyle(
-                                        fontSize: 10,
-                                        color: _itemStatusColor(item.status),
-                                        fontWeight: FontWeight.w600)),
-                              ),
-                            ),
-                          ]),
-                    )),
+                        ])),
+                  ]),
+                )),
           ]),
         ),
         // Order note
         if (o.notes.isNotEmpty)
-          Container(
-            margin: const EdgeInsets.fromLTRB(12, 4, 12, 0),
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.amber.withAlpha(20),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.amber.withAlpha(80)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.amber.withAlpha(20),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.amber.withAlpha(80)),
+              ),
+              child: Row(children: [
+                const Icon(Icons.info_outline, size: 14, color: Colors.amber),
+                const SizedBox(width: 6),
+                Expanded(
+                    child: Text(o.notes,
+                        style: const TextStyle(fontSize: 11, color: Colors.amber))),
+              ]),
             ),
-            child: Row(children: [
-              const Icon(Icons.info_outline, size: 14, color: Colors.amber),
-              const SizedBox(width: 6),
-              Expanded(
-                  child: Text(o.notes,
-                      style:
-                          const TextStyle(fontSize: 11, color: Colors.amber))),
-            ]),
           ),
-        // Actions
-        Padding(
-          padding: const EdgeInsets.all(10),
-          child: Row(children: [
-            Expanded(
-                child: FilledButton.icon(
-              icon: const Icon(Icons.check_circle_rounded, size: 16),
-              label: const Text('Order Ready', style: TextStyle(fontSize: 12)),
-              onPressed: () => widget.ref
-                  .read(kitchenProvider.notifier)
-                  .markOrderReady(o.id),
-              style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.orderReady,
-                  padding: const EdgeInsets.symmetric(vertical: 10)),
-            )),
-          ]),
-        ),
+        const SizedBox(height: 10),
       ]),
     );
   }
+}
 
-  Color _itemStatusColor(OrderItemStatus s) => switch (s) {
-        OrderItemStatus.pending => AppColors.orderOpen,
-        OrderItemStatus.sent => AppColors.orderKitchen,
-        OrderItemStatus.preparing => Colors.purple,
-        OrderItemStatus.ready => AppColors.orderReady,
-        OrderItemStatus.served => Colors.grey,
-      };
+// Read-only card showing a table whose bill has been paid (done).
+class _DoneTableCard extends StatelessWidget {
+  const _DoneTableCard({required this.order});
+  final OrderEntity order;
 
-  String _itemStatusLabel(OrderItemStatus s) => switch (s) {
-        OrderItemStatus.pending => 'Not sent',
-        OrderItemStatus.sent => 'Tap → Prep',
-        OrderItemStatus.preparing => 'Tap → Done',
-        OrderItemStatus.ready => 'Ready ✓',
-        OrderItemStatus.served => 'Served',
-      };
+  @override
+  Widget build(BuildContext context) {
+    final isDark = context.isDark;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.darkCard : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.success.withAlpha(70)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(children: [
+          Container(
+            width: 34, height: 34,
+            decoration: BoxDecoration(
+                color: AppColors.success.withAlpha(20), shape: BoxShape.circle),
+            child: const Icon(Icons.check_circle_rounded,
+                color: AppColors.success, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Text(order.tableName,
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+              const SizedBox(width: 8),
+              Text('#${order.orderNumber}',
+                  style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+            ]),
+            const SizedBox(height: 2),
+            Text('Bill paid',
+                style: TextStyle(
+                    fontSize: 11,
+                    color: AppColors.success,
+                    fontWeight: FontWeight.w700)),
+          ]),
+          const Spacer(),
+          Text('${order.items.length} items',
+              style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+        ]),
+      ),
+    );
+  }
 }
 
 // ═══════════════════════════════════════════════════════

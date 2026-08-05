@@ -694,35 +694,28 @@ final posProvider = StateNotifierProvider.family<POSNotifier, AsyncValue<OrderEn
 );
 
 // ── Kitchen state ─────────────────────────────────────
-class KitchenNotifier extends StateNotifier<List<OrderEntity>> {
-  KitchenNotifier(this._db) : super([]) { _load(); }
+class KitchenState {
+  const KitchenState({this.active = const [], this.done = const []});
+  final List<OrderEntity> active; // orders in the kitchen (not yet paid)
+  final List<OrderEntity> done;   // orders whose bill was paid today
+}
+
+class KitchenNotifier extends StateNotifier<KitchenState> {
+  KitchenNotifier(this._db) : super(const KitchenState()) { _load(); }
   final AppDatabase _db;
 
   Future<void> _load() async {
     final rows = await _db.orderDao.kitchenPending();
-    final orders = await Future.wait(rows.map((r) => _buildOrder(_db, r)));
-    state = orders;
-  }
-
-  Future<void> markItemPreparing(int itemId) async {
-    await _db.orderDao.updateItem(OrderItemsCompanion(id: Value(itemId), status: const Value('preparing')));
-    await _load();
-  }
-
-  Future<void> markItemReady(int itemId) async {
-    await _db.orderDao.updateItem(OrderItemsCompanion(id: Value(itemId), status: const Value('ready')));
-    await _load();
-  }
-
-  Future<void> markOrderReady(int orderId) async {
-    await _db.orderDao.updateOrder(OrdersCompanion(id: Value(orderId), status: const Value('ready')));
-    await _load();
+    final active = await Future.wait(rows.map((r) => _buildOrder(_db, r)));
+    final doneRows = await _db.orderDao.doneToday();
+    final done = await Future.wait(doneRows.map((r) => _buildOrder(_db, r)));
+    state = KitchenState(active: active, done: done);
   }
 
   void refresh() => _load();
 }
 
-final kitchenProvider = StateNotifierProvider<KitchenNotifier, List<OrderEntity>>(
+final kitchenProvider = StateNotifierProvider<KitchenNotifier, KitchenState>(
   (ref) => KitchenNotifier(ref.watch(dbProvider)));
 
 // ── Cash Register ─────────────────────────────────────
