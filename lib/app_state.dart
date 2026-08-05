@@ -80,28 +80,10 @@ class AuthState {
 }
 
 class AuthNotifier extends StateNotifier<AuthState> {
-  AuthNotifier(this._db) : super(const AuthState()) { _restoreSession(); }
+  AuthNotifier(this._db) : super(const AuthState());
   final AppDatabase _db;
   final _storage = const FlutterSecureStorage();
   static const _key = 'session_user_id';
-  static const _timeKey = 'session_last_time';
-  static const _timeoutMinutes = 10;
-
-  Future<void> _restoreSession() async {
-    final idStr = await _storage.read(key: _key);
-    if (idStr == null) return;
-    final timeStr = await _storage.read(key: _timeKey);
-    if (timeStr != null) {
-      final lastTime = DateTime.tryParse(timeStr);
-      if (lastTime != null && DateTime.now().difference(lastTime).inMinutes > _timeoutMinutes) {
-        await _storage.delete(key: _key);
-        await _storage.delete(key: _timeKey);
-        return;
-      }
-    }
-    final row = await _db.userDao.byId(int.tryParse(idStr) ?? 0);
-    if (row != null) state = AuthState(user: _map(row));
-  }
 
   Future<bool> login(String email, String password) async {
     state = state.copyWith(isLoading: true, error: null);
@@ -112,14 +94,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
       return false;
     }
     await _storage.write(key: _key, value: row.id.toString());
-    await _storage.write(key: _timeKey, value: DateTime.now().toIso8601String());
     state = AuthState(user: _map(row));
     return true;
   }
 
   Future<void> logout() async {
     await _storage.delete(key: _key);
-    await _storage.delete(key: _timeKey);
     state = const AuthState();
   }
 

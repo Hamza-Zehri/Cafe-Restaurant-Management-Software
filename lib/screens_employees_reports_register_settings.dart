@@ -12,11 +12,21 @@ class EmployeesScreen extends ConsumerStatefulWidget {
 class _EmployeesScreenState extends ConsumerState<EmployeesScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tab;
+  late final bool _isManager;
+  late final List<(String, Widget)> _tabs;
 
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 3, vsync: this);
+    _isManager = ref.read(authProvider).user?.role == UserRole.manager;
+    final all = <(String, Widget)>[
+      ('Staff List', _StaffListTab(onEdit: _showEditStaffDialog)),
+      ('Attendance Today', const _AttendanceTab()),
+      ('Salary Payments', const _SalaryTab()),
+    ];
+    final visible = _isManager ? all.skip(1).toList() : all;
+    _tabs = visible;
+    _tab = TabController(length: visible.length, vsync: this);
   }
 
   @override
@@ -29,24 +39,21 @@ class _EmployeesScreenState extends ConsumerState<EmployeesScreen>
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => context.go('/dashboard')),
         title: const Text('Staff Management'),
         actions: [
-          FilledButton.icon(
-            icon: const Icon(Icons.person_add, size: 16),
-            label: const Text('Add Staff'),
-            onPressed: _showAddStaffDialog,
-          ),
+          if (!_isManager)
+            FilledButton.icon(
+              icon: const Icon(Icons.person_add, size: 16),
+              label: const Text('Add Staff'),
+              onPressed: _showAddStaffDialog,
+            ),
           const SizedBox(width: 12),
           const TopBarActions(),
         ],
         bottom: TabBar(
           controller: _tab,
-          tabs: const [Tab(text: 'Staff List'), Tab(text: 'Attendance Today'), Tab(text: 'Salary Payments')],
+          tabs: _tabs.map((t) => Tab(text: t.$1)).toList(),
         ),
       ),
-      body: TabBarView(controller: _tab, children: [
-        _StaffListTab(onEdit: _showEditStaffDialog),
-        const _AttendanceTab(),
-        const _SalaryTab(),
-      ]),
+      body: TabBarView(controller: _tab, children: _tabs.map((t) => t.$2).toList()),
     ));
   }
 

@@ -98,7 +98,6 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
           IconButton(icon: const Icon(Icons.fit_screen_rounded), tooltip: 'Reset zoom',
             onPressed: () => _transform.value = Matrix4.identity()),
           const SizedBox(width: 8),
-          const TopBarActions(),
         ],
       ),
       body: _selectedFloorId == -1
@@ -511,7 +510,6 @@ class _POSScreenState extends ConsumerState<POSScreen> {
               },
             ),
           ],
-          const TopBarActions(),
         ],
       ),
       body: Row(children: [

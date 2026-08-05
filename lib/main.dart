@@ -40,9 +40,15 @@ part 'screens_kitchen_menu_customers.dart';
 part 'screens_employees_reports_register_settings.dart';
 part 'screens_setup.dart';
 
-// Manager (order-taking role) is limited to floor/POS screens.
+// Manager (order-taking role) is limited to operational screens:
+// floor/POS, kitchen, register, customers (loans) and staff attendance/salary.
 bool _canManagerAccess(String loc) =>
-    loc == '/dashboard' || loc == '/floor' || loc == '/pos' || loc.startsWith('/pos/');
+    loc == '/dashboard' ||
+    loc == '/floor' || loc == '/pos' || loc.startsWith('/pos/') ||
+    loc == '/kitchen' ||
+    loc == '/cash-register' ||
+    loc == '/customers' ||
+    loc == '/employees';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -204,6 +210,7 @@ class SideNav extends ConsumerWidget {
             preferBelow: false,
             child: GestureDetector(
               onTap: () async {
+                if (!await ensureNoOpenOrders(context, ref)) return;
                 final confirm = await showDialog<bool>(
                   context: context,
                   builder: (ctx) => AlertDialog(
@@ -312,6 +319,7 @@ class TopBarActions extends ConsumerWidget {
         child: IconButton(
           icon: const Icon(Icons.logout_rounded),
           onPressed: () async {
+            if (!await ensureNoOpenOrders(context, ref)) return;
             final ok = await showDialog<bool>(
               context: context,
               builder: (ctx) => AlertDialog(
@@ -393,6 +401,30 @@ void showError(BuildContext ctx, String msg) =>
     content: Row(children: [const Icon(Icons.error_outline, color: Colors.white, size: 18), const SizedBox(width: 8), Expanded(child: Text(msg))]),
     backgroundColor: AppColors.error, duration: const Duration(seconds: 4),
   ));
+
+// ── Open orders guard ──────────────────────────────────
+// Blocks logout/exit while any order is still open for a table.
+Future<bool> ensureNoOpenOrders(BuildContext ctx, WidgetRef ref) async {
+  final List<OrderEntity> orders;
+  try {
+    orders = await ref.read(activeOrdersProvider.future);
+  } catch (_) {
+    return true;
+  }
+  final openCount = orders.where((o) => o.status != OrderStatus.paid && o.status != OrderStatus.cancelled).length;
+  if (openCount > 0) {
+    await showDialog<void>(context: ctx, builder: (_) => AlertDialog(
+      icon: const Icon(Icons.receipt_long_rounded, color: Colors.orange, size: 34),
+      title: const Text('Open orders pending'),
+      content: Text(openCount == 1
+          ? 'There is 1 open order on a table. Complete it before logging out.'
+          : 'There are $openCount open orders on tables. Complete them all before logging out.'),
+      actions: [FilledButton(onPressed: () => Navigator.pop(_), child: const Text('OK'))],
+    ));
+    return false;
+  }
+  return true;
+}
 
 // ── Confirmation dialog ───────────────────────────────
 Future<bool> confirm(BuildContext ctx, String title, String msg, {bool danger = false}) async {
@@ -627,8 +659,6 @@ class DashboardScreen extends ConsumerWidget {
     final orders = ref.watch(activeOrdersProvider);
     final register = ref.watch(registerProvider);
     final settings = ref.watch(settingsProvider);
-    final user = ref.watch(authProvider).user;
-    final isManager = user?.role == UserRole.manager;
 
     return SideNav(child: Scaffold(
       body: CustomScrollView(slivers: [
@@ -640,7 +670,7 @@ class DashboardScreen extends ConsumerWidget {
               style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant, fontWeight: FontWeight.w400)),
           ]),
           actions: [
-            if (!isManager && register == null)
+            if (register == null)
               Padding(
                 padding: const EdgeInsets.only(right: 12),
                 child: FilledButton.icon(
