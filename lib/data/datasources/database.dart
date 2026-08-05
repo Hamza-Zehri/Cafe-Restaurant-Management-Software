@@ -324,6 +324,7 @@ class UserDao extends DatabaseAccessor<AppDatabase> with _$UserDaoMixin {
     (select(users)..where((u) => u.email.equals(email))).getSingleOrNull();
   Future<UserRow?> byId(int id) =>
     (select(users)..where((u) => u.id.equals(id))).getSingleOrNull();
+  Future<List<UserRow>> allUsers() => select(users).get();
   Stream<List<UserRow>> watchAll() =>
     (select(users)..where((u) => u.isActive.equals(true))..orderBy([(u) => OrderingTerm.asc(u.name)])).watch();
   Future<int> insert_(UsersCompanion c) => into(users).insert(c);

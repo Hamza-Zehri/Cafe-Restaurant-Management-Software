@@ -85,12 +85,17 @@ class AuthNotifier extends StateNotifier<AuthState> {
   final _storage = const FlutterSecureStorage();
   static const _key = 'session_user_id';
 
-  Future<bool> login(String email, String password) async {
+  Future<bool> login(String password) async {
     state = state.copyWith(isLoading: true, error: null);
     final hash = sha256.convert(utf8.encode(password)).toString();
-    final row = await _db.userDao.byEmail(email.trim().toLowerCase());
-    if (row == null || row.passwordHash != hash || !row.isActive) {
-      state = state.copyWith(isLoading: false, error: 'Invalid email or password');
+    final rows = await _db.userDao.allUsers();
+    // Match only login-capable roles (owner/admin/manager) by password.
+    final row = rows.where((r) =>
+        r.isActive &&
+        (r.role == 'owner' || r.role == 'admin' || r.role == 'manager') &&
+        r.passwordHash == hash).firstOrNull;
+    if (row == null) {
+      state = state.copyWith(isLoading: false, error: 'Incorrect password');
       return false;
     }
     await _storage.write(key: _key, value: row.id.toString());

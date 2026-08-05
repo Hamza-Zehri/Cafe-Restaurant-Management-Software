@@ -451,14 +451,14 @@ class LoginScreen extends ConsumerStatefulWidget {
 }
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
-  final _email = TextEditingController();
   final _pass = TextEditingController();
   bool _obscure = true;
 
-  @override void dispose() { _email.dispose(); _pass.dispose(); super.dispose(); }
+  @override void dispose() { _pass.dispose(); super.dispose(); }
 
   Future<void> _login() async {
-    final ok = await ref.read(authProvider.notifier).login(_email.text, _pass.text);
+    if (_pass.text.isEmpty) return;
+    final ok = await ref.read(authProvider.notifier).login(_pass.text);
     if (ok && mounted) context.go('/dashboard');
   }
 
@@ -471,118 +471,160 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          Row(children: [
-            // Left brand panel
-            Expanded(flex: 5, child: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft, end: Alignment.bottomRight,
-                  colors: [Color(0xFF1A56DB), Color(0xFF0EA5E9)],
-                ),
+          // Attractive gradient background
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                colors: isDark
+                    ? const [Color(0xFF0A1628), Color(0xFF16244A), Color(0xFF1A56DB)]
+                    : const [Color(0xFFEFF6FF), Color(0xFFDBEAFE), Color(0xFFBFDBFE)],
               ),
-              child: Stack(children: [
-                Positioned(top: -80, left: -80, child: Container(
-                  width: 320, height: 320,
-                  decoration: BoxDecoration(color: Colors.white.withAlpha(12), shape: BoxShape.circle),
-                )),
-                Positioned(bottom: -120, right: -120, child: Container(
-                  width: 400, height: 400,
-                  decoration: BoxDecoration(color: Colors.white.withAlpha(8), shape: BoxShape.circle),
-                )),
-                Padding(padding: const EdgeInsets.all(60), child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            ),
+          ),
+          // Decorative circles
+          Positioned(top: -120, left: -120, child: Container(
+            width: 340, height: 340,
+            decoration: BoxDecoration(
+              color: (isDark ? Colors.white : const Color(0xFF1A56DB)).withAlpha(10),
+              shape: BoxShape.circle,
+            ),
+          )),
+          Positioned(bottom: -160, right: -160, child: Container(
+            width: 420, height: 420,
+            decoration: BoxDecoration(
+              color: (isDark ? Colors.white : const Color(0xFF1A56DB)).withAlpha(8),
+              shape: BoxShape.circle,
+            ),
+          )),
+          Positioned(top: 120, right: 40, child: Container(
+            width: 90, height: 90,
+            decoration: BoxDecoration(
+              color: (isDark ? Colors.white : const Color(0xFF0EA5E9)).withAlpha(10),
+              shape: BoxShape.circle,
+            ),
+          )),
+          // Centered login card
+          Center(child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(40, 40, 40, 32),
+                decoration: BoxDecoration(
+                  color: context.cardBg,
+                  borderRadius: BorderRadius.circular(26),
+                  border: Border.all(color: context.border, width: 0.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withAlpha(isDark ? 40 : 18),
+                      blurRadius: 40, spreadRadius: 2, offset: const Offset(0, 12),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Container(
-                      width: 256, height: 256,
-                      decoration: BoxDecoration(color: Colors.white.withAlpha(30), borderRadius: BorderRadius.circular(24)),
+                    // Centered logo
+                    Center(child: Container(
+                      width: 96, height: 96,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          begin: Alignment.topLeft, end: Alignment.bottomRight,
+                          colors: [Color(0xFF1A56DB), Color(0xFF0EA5E9)],
+                        ),
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: [
+                          BoxShadow(color: const Color(0xFF1A56DB).withAlpha(60), blurRadius: 24, offset: const Offset(0, 8)),
+                        ],
+                      ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(24),
                         child: settings.logoPath != null && settings.logoPath!.isNotEmpty
-                          ? Image.file(File(AppPaths.resolve(settings.logoPath!)), fit: BoxFit.contain)
-                          : const Icon(Icons.restaurant, color: Colors.white, size: 96),
+                            ? Image.file(File(AppPaths.resolve(settings.logoPath!)), fit: BoxFit.contain)
+                            : const Icon(Icons.restaurant, color: Colors.white, size: 44),
                       ),
-                    ).animate().scale(duration: 600.ms, curve: Curves.elasticOut),
-                    const SizedBox(height: 32),
+                    ).animate().scale(duration: 600.ms, curve: Curves.elasticOut)),
+                    const SizedBox(height: 22),
+                    // Bold restaurant name
                     Text(
                       settings.name.isNotEmpty ? settings.name : 'Restaurant Management',
+                      textAlign: TextAlign.center,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white, fontSize: 46, fontWeight: FontWeight.w800, height: 1.1,
-                        letterSpacing: -1,
+                      style: TextStyle(
+                        color: context.cs.onSurface,
+                        fontSize: 27,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.5,
+                        height: 1.15,
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    Text('Streamlined order management, live table tracking, billing and registers, real-time analytics reports, and employee accounts for modern eateries.',
-                      style: TextStyle(color: Colors.white.withAlpha(200), fontSize: 14, height: 1.5, fontWeight: FontWeight.w400)),
-                  ],
-                )),
-              ]),
-            )),
-            // Right login form panel
-            Expanded(flex: 7, child: Container(
-              color: context.bg,
-              padding: const EdgeInsets.all(80),
-              child: Center(child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 420),
-                child: Form(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text('Welcome Back', style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.5)),
-                      Text('Enter your credentials to access your order terminal', style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 13)),
-                      const SizedBox(height: 36),
-                      TextField(
-                        controller: _email,
-                        autofocus: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Username / Email',
-                          prefixIcon: Icon(Icons.alternate_email_rounded, size: 18),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Secure order terminal',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 13),
+                    ),
+                    const SizedBox(height: 30),
+                    // Password only
+                    TextField(
+                      controller: _pass,
+                      autofocus: true,
+                      obscureText: _obscure,
+                      onSubmitted: (_) => _login(),
+                      decoration: InputDecoration(
+                        labelText: 'Password',
+                        hintText: 'Enter your password',
+                        prefixIcon: const Icon(Icons.lock_outline_rounded, size: 18),
+                        suffixIcon: IconButton(
+                          icon: Icon(_obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 18),
+                          onPressed: () => setState(() => _obscure = !_obscure),
                         ),
                       ),
-                      const SizedBox(height: 18),
-                      TextField(
-                        controller: _pass,
-                        obscureText: _obscure,
-                        decoration: InputDecoration(
-                          labelText: 'Password',
-                          prefixIcon: const Icon(Icons.lock_outline_rounded, size: 18),
-                          suffixIcon: IconButton(
-                            icon: Icon(_obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 18),
-                            onPressed: () => setState(() => _obscure = !_obscure),
+                    ),
+                    const SizedBox(height: 14),
+                    if (state.error != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.red.withAlpha(15),
+                            borderRadius: BorderRadius.circular(10),
                           ),
+                          child: Row(children: [
+                            const Icon(Icons.error_outline, color: Colors.red, size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(child: Text(state.error!, style: const TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.w600))),
+                          ]),
                         ),
-                        onSubmitted: (_) => _login(),
                       ),
-                      const SizedBox(height: 12),
-                      if (state.error != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: Text(state.error!, style: const TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.w600)),
+                    SizedBox(
+                      height: 50,
+                      child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF1A56DB),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        height: 48,
-                        child: FilledButton(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF1A56DB),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                          ),
-                          onPressed: state.isLoading ? null : _login,
-                          child: state.isLoading
+                        onPressed: state.isLoading ? null : _login,
+                        child: state.isLoading
                             ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                             : const Text('Sign In', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                        ),
-                      ).animate().fadeIn(delay: 250.ms),
-
-                    ],
-                  ),
+                      ),
+                    ).animate().fadeIn(delay: 250.ms),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Admin and Manager access by password',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 11),
+                    ),
+                  ],
                 ),
-              )),
-            )),
-          ]),
+              ),
+            ),
+          )),
           // Floating control buttons in top right
           Positioned(
             top: 24,

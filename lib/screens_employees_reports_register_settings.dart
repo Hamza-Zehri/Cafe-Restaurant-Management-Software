@@ -155,6 +155,20 @@ class _EmployeesScreenState extends ConsumerState<EmployeesScreen>
             if (usesLogin && emailCtrl.text.trim().isEmpty) return;
             if (needsPassword && passCtrl.text.isEmpty) return;
             final db = ref.read(dbProvider);
+            // Admin & manager passwords must be unique (password-only login)
+            if (usesLogin && (existing == null || passCtrl.text.isNotEmpty)) {
+              final newHash = sha256.convert(utf8.encode(passCtrl.text)).toString();
+              final loginUsers = await db.userDao.allUsers();
+              final clash = loginUsers.any((u) =>
+                  u.id != (existing?.id ?? -1) &&
+                  u.isActive &&
+                  (u.role == 'owner' || u.role == 'admin' || u.role == 'manager') &&
+                  u.passwordHash == newHash);
+              if (clash) {
+                showError(ctx, 'This password is already used by another Admin/Manager. Please choose a different one.');
+                return;
+              }
+            }
             if (existing == null) {
               final username = usesLogin
                   ? emailCtrl.text.trim().toLowerCase()
