@@ -621,9 +621,12 @@ class _POSScreenState extends ConsumerState<POSScreen> {
     final order = ref.read(posProvider(widget.tableId)).valueOrNull;
     if (order == null) return;
     await ref.read(posProvider(widget.tableId).notifier).sendToKitchen();
-    // Print kitchen ticket
-    await PrintService.instance.printKitchenTicket(order);
-    if (mounted) showSuccess(context, 'Sent to kitchen & ticket printed');
+    // Print kitchen ticket (respects auto-print setting)
+    final settings = ref.read(settingsProvider);
+    if (settings.autoKitchenPrint) {
+      await PrintService.instance.printKitchenTicket(order);
+    }
+    if (mounted) showSuccess(context, settings.autoKitchenPrint ? 'Sent to kitchen & ticket printed' : 'Sent to kitchen');
   }
 
   Future<void> _printBill() async {
@@ -779,11 +782,14 @@ class _POSScreenState extends ConsumerState<POSScreen> {
             customerName: custName, customerPhone: custPhone,
           );
           if (inv != null) {
-            // Print final receipt
-            await PrintService.instance.printFinalReceipt(inv);
+            // Print final receipt (respects auto-print setting)
+            final autoPrint = ref.read(settingsProvider).autoPrintBillOnPay;
+            if (autoPrint) {
+              await PrintService.instance.printFinalReceipt(inv);
+            }
             if (mounted) {
               Navigator.of(context).pop();
-              showSuccess(context, 'Payment done! Receipt printed.');
+              showSuccess(context, autoPrint ? 'Payment done! Receipt printed.' : 'Payment done!');
               context.go('/floor');
             }
           }
