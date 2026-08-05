@@ -40,6 +40,10 @@ part 'screens_kitchen_menu_customers.dart';
 part 'screens_employees_reports_register_settings.dart';
 part 'screens_setup.dart';
 
+// Manager (order-taking role) is limited to floor/POS screens.
+bool _canManagerAccess(String loc) =>
+    loc == '/dashboard' || loc == '/floor' || loc == '/pos' || loc.startsWith('/pos/');
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppPaths.init();
@@ -81,6 +85,12 @@ class RestaurantPOSApp extends ConsumerWidget {
         // Not logged in → go through splash so license is checked
         if (!loggedIn && !onLogin) return '/splash';
         if (loggedIn && onLogin) return '/dashboard';
+
+        // Role-based access: manager may only take orders (floor/POS)
+        final user = auth.user;
+        if (user != null && user.role == UserRole.manager && !_canManagerAccess(loc)) {
+          return '/dashboard';
+        }
         return null;
       },
       routes: [
@@ -142,7 +152,10 @@ class SideNav extends ConsumerWidget {
       (Icons.bar_chart_rounded, 'Reports', '/reports'),
       (Icons.receipt_long_rounded, 'Expenses', '/expenses'),
       (Icons.point_of_sale_rounded, 'Register', '/cash-register'),
-    ];
+    ].where((it) =>
+        user == null ||
+        user.role != UserRole.manager ||
+        _canManagerAccess(it.$3)).toList();
 
     return Row(children: [
       Container(
@@ -262,7 +275,9 @@ class TopBarActions extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isDark = context.isDark;
-    return Row(mainAxisSize: MainAxisSize.min, children: [
+    final user = ref.watch(authProvider).user;
+    final isManager = user?.role == UserRole.manager;
+    return Row(mainAxisSize: MainAxisSize.min, children:[
       // Full screen toggle
       Tooltip(
         message: 'Toggle Full Screen',
@@ -282,7 +297,8 @@ class TopBarActions extends ConsumerWidget {
           onPressed: () => ref.read(themeModeProvider.notifier).toggle(),
         ),
       ),
-      // Settings
+      // Settings (hidden for manager role)
+      if (!isManager)
       Tooltip(
         message: 'Settings',
         child: IconButton(
@@ -611,6 +627,8 @@ class DashboardScreen extends ConsumerWidget {
     final orders = ref.watch(activeOrdersProvider);
     final register = ref.watch(registerProvider);
     final settings = ref.watch(settingsProvider);
+    final user = ref.watch(authProvider).user;
+    final isManager = user?.role == UserRole.manager;
 
     return SideNav(child: Scaffold(
       body: CustomScrollView(slivers: [
@@ -622,7 +640,7 @@ class DashboardScreen extends ConsumerWidget {
               style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant, fontWeight: FontWeight.w400)),
           ]),
           actions: [
-            if (register == null)
+            if (!isManager && register == null)
               Padding(
                 padding: const EdgeInsets.only(right: 12),
                 child: FilledButton.icon(
@@ -632,7 +650,7 @@ class DashboardScreen extends ConsumerWidget {
                   style: FilledButton.styleFrom(backgroundColor: Colors.orange),
                 ),
               )
-            else
+            else if (register != null)
               Padding(
                 padding: const EdgeInsets.only(right: 12),
                 child: Chip(
@@ -1028,10 +1046,11 @@ class _Legend extends StatelessWidget {
   ]);
 }
 
-class _QuickActions extends StatelessWidget {
+class _QuickActions extends ConsumerWidget {
   @override
-  Widget build(BuildContext context) {
-    final actions = [
+  Widget build(BuildContext context, WidgetRef ref) {
+    final user = ref.watch(authProvider).user;
+    final allActions = [
       ('New Order', Icons.add_circle_rounded, '/floor', const Color(0xFF1A56DB)),
       ('Kitchen', Icons.kitchen_rounded, '/kitchen', const Color(0xFFD97706)),
       ('Customers', Icons.people_rounded, '/customers', const Color(0xFF16A34A)),
@@ -1040,6 +1059,9 @@ class _QuickActions extends StatelessWidget {
       ('Staff', Icons.badge_rounded, '/employees', const Color(0xFFDB2777)),
       ('Register', Icons.point_of_sale_rounded, '/cash-register', const Color(0xFF0EA5E9)),
     ];
+    final actions = user?.role == UserRole.manager
+        ? allActions.where((a) => _canManagerAccess(a.$3)).toList()
+        : allActions;
 
     return AppCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

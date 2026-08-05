@@ -33,7 +33,7 @@ class UserEntity {
   static const _defaults = <UserRole, Map<String, bool>>{
     UserRole.owner:     {'all': true, 'reports': true, 'void_bill': true, 'discount': true, 'manage_menu': true, 'manage_staff': true, 'close_register': true},
     UserRole.admin:     {'all': true, 'reports': true, 'void_bill': true, 'discount': true, 'manage_menu': true, 'manage_staff': true, 'close_register': true},
-    UserRole.manager:   {'reports': true, 'void_bill': false, 'discount': true, 'manage_menu': true, 'manage_staff': false, 'close_register': true},
+    UserRole.manager:   {'take_order': true},
     UserRole.cashier:   {'void_bill': false, 'discount': false, 'close_register': true, 'process_payment': true},
     UserRole.waiter:    {'take_order': true},
     UserRole.kitchen:   {'view_kitchen': true},
