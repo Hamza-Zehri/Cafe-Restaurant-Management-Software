@@ -1,24 +1,155 @@
 // ═══════════════════════════════════════════════════════
-// PRINT SERVICE — Kitchen tickets, bills, invoices
+// PRINT SERVICE — Kitchen tickets, bills, invoices, reports
 // ═══════════════════════════════════════════════════════
 
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:intl/intl.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:open_filex/open_filex.dart';
 
+import '../data/datasources/database.dart';
 import '../domain/entities.dart';
+import 'thermal_layout.dart';
 import 'utils/app_paths.dart';
+
+/// Thrown by [PrintService] when a print/save operation cannot complete.
+class PrintException implements Exception {
+  final String message;
+  const PrintException(this.message);
+  @override
+  String toString() => message;
+}
+
+/// Per-item shift stats: how many times it was ordered, how much was sold,
+/// and how much actually went to the kitchen. Comparing sold vs kitchen
+/// catches items that were entered but never sent, or prepared but not billed.
+class ReportItemStat {
+  final String name;
+  final int orderCount;
+  final int qty;
+  final int kitchenQty;
+  const ReportItemStat(this.name, this.orderCount, this.qty, this.kitchenQty);
+
+  bool get discrepancy => kitchenQty < qty;
+}
+
+/// Shift data gathered from the database for the Z report.
+class ReportData {
+  final int completedOrders;
+  final int totalItemsSold;
+  final int voidedOrders;
+  final int kitchenGenerated;
+  final int kitchenCompleted;
+  final int voidedKitchen;
+  final int kitchenItemsSent;
+  final List<ReportItemStat> itemSales;
+  final List<ReportItemStat> kitchenItems;
+  const ReportData({
+    this.completedOrders = 0,
+    this.totalItemsSold = 0,
+    this.voidedOrders = 0,
+    this.kitchenGenerated = 0,
+    this.kitchenCompleted = 0,
+    this.voidedKitchen = 0,
+    this.kitchenItemsSent = 0,
+    this.itemSales = const [],
+    this.kitchenItems = const [],
+  });
+}
 
 class PrintService {
   static final PrintService instance = PrintService._();
   PrintService._();
 
   RestaurantSettings _settings = const RestaurantSettings();
+  AppDatabase? _db;
   void configure(RestaurantSettings s) => _settings = s;
+  void setDatabase(AppDatabase db) => _db = db;
+
+  /// 'thermal' → direct print to the selected printer (no OS dialog).
+  /// Anything else → generate a PDF the user saves to disk.
+  String get printerMode => _settings.printerMode == 'thermal' ? 'thermal' : 'pdf';
+
+  /// Lists printers installed on this machine.
+  Future<List<Printer>> listPrinters() => Printing.listPrinters();
+
+  // ── Output dispatcher ──────────────────────────────
+  // Builds the document bytes then outputs them according to the
+  // configured printer mode:
+  //   thermal → find the saved printer and send the job directly
+  //             (winspool), never opening an OS dialog. The page is built
+  //             with the printer's real geometry so nothing gets clipped.
+  //   pdf     → saves the 80mm PDF via a save dialog, no printer dialog.
+  Future<void> _emit(String name, Future<Uint8List> Function(PdfPageFormat) build) async {
+    if (printerMode == 'thermal') {
+      final printers = await Printing.listPrinters();
+      final selected = _settings.selectedPrinterName;
+      if (selected.isEmpty) {
+        throw const PrintException('Please select a printer in Printer Settings.');
+      }
+      Printer? printer;
+      for (final p in printers) {
+        if (p.name == selected) {
+          printer = p;
+          break;
+        }
+      }
+      if (printer == null || !printer.isAvailable) {
+        throw const PrintException('Thermal printer is not connected.');
+      }
+      await Printing.directPrintPdf(
+        printer: printer,
+        // Sane paper for the printer DC; the real geometry comes from onLayout.
+        format: _layout().pageFormat.copyWith(height: PdfPageFormat.a4.height),
+        onLayout: (format) => build(format),
+        name: name,
+      );
+    } else {
+      final bytes = await build(_layout().pageFormat);
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save $name as PDF',
+        fileName: '$name.pdf',
+        type: FileType.custom,
+        allowedExtensions: ['pdf'],
+      );
+      if (path == null) {
+        throw const PrintException('PDF save canceled.');
+      }
+      await File(path).writeAsBytes(bytes);
+      OpenFilex.open(path);
+    }
+  }
+
+  // ── Test print ─────────────────────────────────────
+  // Prints a small diagnostic page through the current mode.
+  Future<void> testPrint() => _emit('Printer-Test', (format) async {
+    final t = _layout(format: format);
+    final pdf = pw.Document();
+    pdf.addPage(pw.Page(
+      pageFormat: t.pageFormat,
+      build: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+        pw.SizedBox(height: 4),
+        t.center('PRINTER TEST', font: thermalBold, size: 14),
+        pw.SizedBox(height: 3),
+        t.center(_settings.name, font: thermalRegular, size: 8),
+        pw.SizedBox(height: 4),
+        t.dashedLine(),
+        t.row('Mode', printerMode.toUpperCase(), size: 9, font: thermalBold),
+        t.row('Printer', _settings.selectedPrinterName.isEmpty ? 'Default' : _settings.selectedPrinterName, size: 9, font: thermalRegular),
+        t.row('Width', '${_settings.receiptWidth == 80 ? 80 : 58}mm', size: 9, font: thermalRegular),
+        t.row('Time', _df.format(DateTime.now()), size: 9, font: thermalRegular),
+        t.dashedLine(h: 1.4),
+        pw.SizedBox(height: 4),
+        t.credit(thermalRegular, 7),
+      ]),
+    ));
+    return pdf.save();
+  });
 
   final _df = DateFormat('dd/MM/yyyy HH:mm');
   final _tf = DateFormat('HH:mm');
@@ -27,116 +158,104 @@ class PrintService {
   String _dealSummary(OrderItemEntity item) =>
       item.dealItems.map((d) => '${d.quantity}x ${d.name}').join(', ');
 
-  // ── Kitchen Ticket ────────────────────────────────
-  Future<void> printKitchenTicket(OrderEntity order) async {
-    final items = order.items.where((i) => !i.isVoided && i.status == OrderItemStatus.pending).toList();
-    if (items.isEmpty) return;
+  // ── Layout helper ──────────────────────────────────
+  ThermalLayout _layout({PdfPageFormat? format}) {
+    if (format != null) return ThermalLayout.fromFormat(format);
+    final is80mm = _settings.receiptWidth == 80;
+    return ThermalLayout(paperWidthMm: is80mm ? 80 : 58, marginMm: is80mm ? 4 : 3);
+  }
 
-    await Printing.layoutPdf(
-      onLayout: (_) => _buildKitchenPDF(order, items),
-      name: 'Kitchen-${order.orderNumber}',
+  // ── Fonts ──────────────────────────────────────────
+  static pw.Font get bold => pw.Font.helveticaBold();
+  static pw.Font get regular => pw.Font.helvetica();
+  // Monospace thermal/dot-matrix fonts for POS receipts.
+  static pw.Font get thermalBold => pw.Font.courierBold();
+  static pw.Font get thermalRegular => pw.Font.courier();
+
+  // ── Shift data for reports ─────────────────────────
+  // Everything is calculated from the real database: paid invoices,
+  // their items (grouped by name), voided orders and kitchen activity
+  // since the current register opened. Each item records how many times
+  // it was ordered and how much actually went to the kitchen, so the
+  // X/Z report can be checked against the printed kitchen tickets.
+  Future<ReportData> _collectShiftData(DateTime since) async {
+    final db = _db;
+    if (db == null) return const ReportData();
+    final now = DateTime.now();
+    final invoices = await db.invoiceDao.forPeriod(since, now);
+    final orders = await db.orderDao.forPeriod(since, now);
+
+    final soldQty = <String, int>{};
+    final soldOrders = <String, Set<int>>{};
+    var totalItems = 0;
+    for (final inv in invoices) {
+      final items = await db.orderDao.itemsForOrder(inv.orderId);
+      for (final it in items) {
+        if (it.isVoided) continue;
+        soldQty[it.menuItemName] = (soldQty[it.menuItemName] ?? 0) + it.quantity;
+        (soldOrders[it.menuItemName] ??= <int>{}).add(inv.orderId);
+        totalItems += it.quantity;
+      }
+    }
+
+    var kitchenGenerated = 0, kitchenItemsSent = 0, kitchenCompleted = 0, voidedKitchen = 0;
+    final kitchenQty = <String, int>{};
+    for (final order in orders) {
+      kitchenGenerated += order.kitchenTicketCount;
+      final items = await db.orderDao.itemsForOrder(order.id);
+      for (final it in items) {
+        if (it.isVoided) continue;
+        if (it.sentToKitchenAt != null) {
+          kitchenItemsSent += it.quantity;
+          kitchenQty[it.menuItemName] = (kitchenQty[it.menuItemName] ?? 0) + it.quantity;
+        }
+      }
+      if (order.kitchenTicketCount > 0) {
+        if (order.status == 'paid') kitchenCompleted++;
+        if (order.status == 'cancelled') voidedKitchen++;
+      }
+    }
+
+    final names = <String>{...soldQty.keys, ...kitchenQty.keys};
+    final itemStats = names.map((n) => ReportItemStat(
+      n,
+      soldOrders[n]?.length ?? 0,
+      soldQty[n] ?? 0,
+      kitchenQty[n] ?? 0,
+    )).toList()..sort((a, b) => b.qty.compareTo(a.qty));
+
+    return ReportData(
+      completedOrders: invoices.length,
+      totalItemsSold: totalItems,
+      voidedOrders: orders.where((o) => o.status == 'cancelled').length,
+      kitchenGenerated: kitchenGenerated,
+      kitchenCompleted: kitchenCompleted,
+      voidedKitchen: voidedKitchen,
+      kitchenItemsSent: kitchenItemsSent,
+      itemSales: itemStats,
+      kitchenItems: itemStats.where((s) => s.kitchenQty > 0).toList(),
     );
   }
 
-  static pw.Font get bold => pw.Font.helveticaBold();
-  static pw.Font get regular => pw.Font.helvetica();
+  // ── Kitchen Ticket ────────────────────────────────
+  Future<void> printKitchenTicket(OrderEntity order, {int? ticketNumber}) async {
+    final items = order.items.where((i) => !i.isVoided && i.status == OrderItemStatus.pending).toList();
+    if (items.isEmpty) return;
 
-  Future<Uint8List> _buildKitchenPDF(OrderEntity order, List<OrderItemEntity> items) async {
-    final pdf = pw.Document();
-    final font = bold;
-    final fontReg = regular;
-
-    pdf.addPage(pw.Page(
-      pageFormat: PdfPageFormat(_mmToPt(80), double.infinity, marginAll: _mmToPt(3)),
-      build: (ctx) => pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-          pw.Center(child: pw.Text('** KITCHEN TICKET **',
-              style: pw.TextStyle(font: font, fontSize: 14))),
-          pw.SizedBox(height: 4),
-          pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
-            pw.Text('Order: #${order.orderNumber}', style: pw.TextStyle(font: font, fontSize: 12)),
-            pw.Text('Table: ${order.tableName}', style: pw.TextStyle(font: font, fontSize: 12)),
-          ]),
-          pw.Text('Waiter: ${order.waiterName}  |  Guests: ${order.guestCount}',
-              style: pw.TextStyle(font: fontReg, fontSize: 9)),
-          pw.Text('Time: ${_tf.format(DateTime.now())}',
-              style: pw.TextStyle(font: fontReg, fontSize: 9)),
-          pw.Divider(thickness: 1),
-          pw.SizedBox(height: 4),
-          ...items.map((item) => pw.Padding(
-            padding: const pw.EdgeInsets.only(bottom: 8),
-            child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-              pw.Row(children: [
-                pw.Container(
-                  width: 28, height: 28,
-                  decoration: pw.BoxDecoration(
-                    border: pw.Border.all(width: 1),
-                    borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
-                  ),
-                  child: pw.Center(child: pw.Text('${item.quantity}',
-                      style: pw.TextStyle(font: font, fontSize: 14))),
-                ),
-                pw.SizedBox(width: 8),
-                pw.Expanded(child: pw.Text(item.menuItem.name,
-                    style: pw.TextStyle(font: font, fontSize: 13))),
-              ]),
-              if (item.modifiers.isNotEmpty)
-                pw.Padding(
-                  padding: const pw.EdgeInsets.only(left: 36, top: 2),
-                  child: pw.Text(item.modifiers.map((m) => '+ ${m.name}').join(', '),
-                      style: pw.TextStyle(font: fontReg, fontSize: 9, color: PdfColors.blue700)),
-                ),
-              if (item.isDeal && item.dealItems.isNotEmpty)
-                pw.Padding(
-                  padding: const pw.EdgeInsets.only(left: 36, top: 2),
-                  child: pw.Text(_dealSummary(item),
-                      style: pw.TextStyle(font: fontReg, fontSize: 8, color: PdfColors.grey700)),
-                ),
-              if (item.notes.isNotEmpty)
-                pw.Container(
-                  margin: const pw.EdgeInsets.only(left: 36, top: 2),
-                  padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                  decoration: const pw.BoxDecoration(
-                    color: PdfColors.yellow50,
-                    border: pw.Border(left: pw.BorderSide(color: PdfColors.orange, width: 3)),
-                  ),
-                  child: pw.Text('⚠ ${item.notes}',
-                      style: pw.TextStyle(font: font, fontSize: 9, color: PdfColors.orange800)),
-                ),
-            ]),
-          )),
-          pw.Divider(thickness: 1),
-          if (order.notes.isNotEmpty)
-            pw.Container(
-              padding: const pw.EdgeInsets.all(6),
-              decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.red)),
-              child: pw.Text('ORDER NOTE: ${order.notes}',
-                  style: pw.TextStyle(font: font, fontSize: 10, color: PdfColors.red)),
-            ),
-          pw.SizedBox(height: 4),
-          pw.Text('Ticket #${order.kitchenTicketCount + 1}  |  ${_tf.format(DateTime.now())}',
-              style: pw.TextStyle(font: fontReg, fontSize: 8, color: PdfColors.grey600)),
-        ],
-      ),
-    ));
-    return pdf.save();
+    await _emit('Kitchen-${order.orderNumber}',
+        (format) => _buildKitchenPDF(format, order, items, ticketNumber: ticketNumber));
   }
 
   // ── Proforma Bill (before payment) ────────────────
   Future<void> printProformaBill(OrderEntity order) async {
-    await Printing.layoutPdf(
-      onLayout: (fmt) => _buildBillPDF(order, isProforma: true, format: fmt),
-      name: 'Bill-${order.orderNumber}',
-    );
+    await _emit('Bill-${order.orderNumber}',
+        (format) => _buildBillPDF(format, order, isProforma: true));
   }
 
   // ── Final Receipt (after payment) ─────────────────
   Future<void> printFinalReceipt(InvoiceEntity invoice) async {
-    await Printing.layoutPdf(
-      onLayout: (fmt) => _buildReceiptPDF(invoice, format: fmt),
-      name: 'Receipt-${invoice.invoiceNumber}',
-    );
+    await _emit('Receipt-${invoice.invoiceNumber}',
+        (format) => _buildReceiptPDF(format, invoice));
   }
 
   // ── A4 Tax Invoice ────────────────────────────────
@@ -147,119 +266,143 @@ class PrintService {
     );
   }
 
-  // ── X Report ─────────────────────────────────────
-  Future<void> printXReport(CashRegisterEntity reg, {List<_OrderDetail>? soldItems}) async {
-    await Printing.layoutPdf(
-      onLayout: (fmt) => _buildXReportPDF(reg, soldItems: soldItems),
-      name: 'X-Report',
-    );
+  // ── Z Report (end of day) ─────────────────────────
+  Future<void> printZReport(CashRegisterEntity reg, double closingCash) async {
+    final data = await collectShiftData(reg.openedAt);
+    await _emit('Z-Report', (format) => _buildZReportPDF(format, reg, closingCash, data));
   }
 
-  // ── Z Report ─────────────────────────────────────
-  Future<void> printZReport(CashRegisterEntity reg, double closingCash, {List<_OrderDetail>? soldItems}) async {
-    await Printing.layoutPdf(
-      onLayout: (fmt) => _buildZReportPDF(reg, closingCash, soldItems: soldItems),
-      name: 'Z-Report',
-    );
-  }
+  /// Gathers shift stats (item sales + kitchen counts) so the UI can show
+  /// per-item kitchen quantities before printing the Z report.
+  Future<ReportData> collectShiftData(DateTime since) => _collectShiftData(since);
 
-  // ── Internal: Bill PDF ────────────────────────────
-  Future<Uint8List> _buildBillPDF(OrderEntity order, {required bool isProforma, required PdfPageFormat format}) async {
+  // ── Internal: Kitchen PDF ─────────────────────────
+  Future<Uint8List> _buildKitchenPDF(PdfPageFormat format, OrderEntity order, List<OrderItemEntity> items, {int? ticketNumber}) async {
+    final t = _layout(format: format);
     final pdf = pw.Document();
-    final font = bold;
-    final fontReg = regular;
-    final is80mm = _settings.receiptWidth == 80;
-    final width = _mmToPt(is80mm ? 80.0 : 58.0);
-
-    final logoImg = await _getLogoImage();
     pdf.addPage(pw.Page(
-      pageFormat: PdfPageFormat(width, double.infinity, marginAll: _mmToPt(3)),
+      pageFormat: t.pageFormat,
       build: (ctx) => pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          // Header
-          if (logoImg != null)
-            pw.Center(
-              child: pw.Padding(
-                padding: const pw.EdgeInsets.only(bottom: 6),
-                  child: pw.Image(logoImg, width: 65, height: 65, fit: pw.BoxFit.contain),
-              ),
-            ),
-          pw.Center(child: pw.Text(_settings.name,
-              style: pw.TextStyle(font: font, fontSize: 14))),
-          pw.Center(child: pw.Text(_settings.address,
-              style: pw.TextStyle(font: fontReg, fontSize: 8))),
-          pw.Center(child: pw.Text('Tel: ${_settings.phone}',
-              style: pw.TextStyle(font: fontReg, fontSize: 8))),
+          t.center('KITCHEN TICKET', font: thermalBold, size: 14),
+          t.center(_settings.name, font: thermalRegular, size: 8),
           pw.SizedBox(height: 4),
-          pw.Center(
-            child: pw.Container(
-              padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 3),
-              decoration: pw.BoxDecoration(
-                border: pw.Border.all(width: 1.5,
-                    color: isProforma ? PdfColors.orange700 : PdfColors.green700),
-              ),
-              child: pw.Text(isProforma ? 'BILL (NOT PAID)' : 'RECEIPT',
-                  style: pw.TextStyle(font: font, fontSize: 11,
-                      color: isProforma ? PdfColors.orange700 : PdfColors.green700)),
-            ),
-          ),
+          t.dashedLine(),
           pw.SizedBox(height: 4),
-          pw.Divider(thickness: 0.5),
-          _billRow('Date', _df.format(DateTime.now()), font, fontReg),
-          _billRow('Table', order.tableName, font, fontReg),
-          _billRow('Order #', order.orderNumber, font, fontReg),
-          _billRow('Waiter', order.waiterName, font, fontReg),
-          pw.Divider(thickness: 0.5),
-          // Items
-          pw.Row(children: [
-            pw.Expanded(child: pw.Text('Item', style: pw.TextStyle(font: font, fontSize: 9))),
-            pw.Text('Qty', style: pw.TextStyle(font: font, fontSize: 9)),
-            pw.SizedBox(width: 16),
-            pw.SizedBox(width: 60, child: pw.Text('Amount', textAlign: pw.TextAlign.right,
-                style: pw.TextStyle(font: font, fontSize: 9))),
-          ]),
-          pw.Divider(thickness: 0.5),
-          ...order.activeItems.map((item) => pw.Padding(
-            padding: const pw.EdgeInsets.symmetric(vertical: 2),
+          t.row('Order', '#${order.orderNumber}', size: 10, font: thermalBold),
+          t.row('Table', order.tableName, size: 10, font: thermalBold),
+          t.row('Waiter', order.waiterName, size: 9, font: thermalRegular),
+          if (order.guestCount > 0)
+            t.row('Guests', '${order.guestCount}', size: 9, font: thermalRegular),
+          t.row('Time', _tf.format(DateTime.now()), size: 9, font: thermalRegular),
+          pw.SizedBox(height: 4),
+          t.dashedLine(),
+          pw.SizedBox(height: 5),
+          ...items.map((item) => pw.Padding(
+            padding: const pw.EdgeInsets.only(bottom: 6),
             child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-              pw.Row(children: [
-                pw.Expanded(child: pw.Text(item.menuItem.name,
-                    style: pw.TextStyle(font: fontReg, fontSize: 9))),
-                pw.Text('×${item.quantity}', style: pw.TextStyle(font: fontReg, fontSize: 9)),
-                pw.SizedBox(width: 6),
-                pw.SizedBox(width: 60, child: pw.Text(
-                    '${_settings.currencySymbol} ${item.lineTotal.toStringAsFixed(0)}',
-                    textAlign: pw.TextAlign.right,
-                    style: pw.TextStyle(font: font, fontSize: 9))),
-              ]),
+              t.item('${item.quantity}x ${item.menuItem.name}', '', size: 11, font: thermalBold),
+              if (item.modifiers.isNotEmpty)
+                t.sub('  + ${item.modifiers.map((m) => m.name).join(', ')}', size: 8.5, font: thermalRegular),
               if (item.isDeal && item.dealItems.isNotEmpty)
-                pw.Text('  ${_dealSummary(item)}',
-                    style: pw.TextStyle(font: fontReg, fontSize: 7, color: PdfColors.grey600)),
+                t.sub('  - ${_dealSummary(item)}', size: 8, font: thermalRegular),
               if (item.notes.isNotEmpty)
-                pw.Text('  * ${item.notes}',
-                    style: pw.TextStyle(font: fontReg, fontSize: 7, color: PdfColors.grey600)),
+                t.sub('  * ${item.notes}', size: 8.5, font: thermalRegular),
             ]),
           )),
-          pw.Divider(thickness: 0.5),
-          // Totals
-          _totalRow('Subtotal', order.subtotal, font, fontReg),
-          if (order.discountValue > 0)
-            _totalRow('Discount', -order.discountValue, font, fontReg, isNeg: true),
-          if (order.taxValue > 0)
-            _totalRow('Tax (${order.taxPercent.toStringAsFixed(0)}%)', order.taxValue, font, fontReg),
-          if (order.serviceChargeValue > 0)
-            _totalRow('Service (${order.serviceChargePercent.toStringAsFixed(0)}%)', order.serviceChargeValue, font, fontReg),
-          pw.Divider(thickness: 1),
-          pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
-            pw.Text('TOTAL', style: pw.TextStyle(font: font, fontSize: 13)),
-            pw.Text('${_settings.currencySymbol} ${order.grandTotal.toStringAsFixed(0)}',
-                style: pw.TextStyle(font: font, fontSize: 13, color: PdfColors.blue800)),
-          ]),
-          pw.Divider(thickness: 0.5),
+          t.dashedLine(h: 1.4),
           pw.SizedBox(height: 4),
-          pw.Center(child: pw.Text(isProforma ? 'Please wait for payment...' : _settings.footerMessage,
-              style: pw.TextStyle(font: fontReg, fontSize: 8, color: PdfColors.grey600))),
+          if (order.notes.isNotEmpty)
+            pw.Padding(
+              padding: const pw.EdgeInsets.only(bottom: 4),
+              child: pw.Text('ORDER NOTE: ${order.notes}',
+                  style: pw.TextStyle(font: thermalBold, fontSize: 10)),
+            ),
+          t.center('Ticket #${ticketNumber ?? order.kitchenTicketCount + 1}  |  ${_tf.format(DateTime.now())}',
+              font: thermalRegular, size: 8),
+          pw.SizedBox(height: 4),
+          t.credit(thermalRegular, 7),
+          pw.SizedBox(height: 10),
+        ],
+      ),
+    ));
+    return pdf.save();
+  }
+
+  // ── Internal: Bill PDF ────────────────────────────
+  Future<Uint8List> _buildBillPDF(PdfPageFormat format, OrderEntity order, {required bool isProforma}) async {
+    final t = _layout(format: format);
+    final pdf = pw.Document();
+    final logoImg = await _getLogoImage();
+    pdf.addPage(pw.Page(
+      pageFormat: t.pageFormat,
+      build: (ctx) => pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          // Logo — top center, compact, original proportions preserved
+          t.header(logo: logoImg, name: _settings.name),
+          if (_settings.address.isNotEmpty)
+            t.center(_settings.address, font: thermalRegular, size: 8),
+          if (_settings.phone.isNotEmpty)
+            t.center(_settings.phone, font: thermalRegular, size: 8),
+          pw.SizedBox(height: 4),
+          t.dashedLine(),
+          pw.SizedBox(height: 3),
+          t.center(isProforma ? '*** BILL (NOT PAID) ***' : '*** RECEIPT ***', font: thermalBold, size: 11),
+          pw.SizedBox(height: 3),
+          t.dashedLine(),
+          pw.SizedBox(height: 3),
+          t.row('Date', _df.format(DateTime.now()), size: 8.5, font: thermalRegular),
+          t.row('Table', order.tableName, size: 8.5, font: thermalRegular),
+          t.row('Order #', order.orderNumber, size: 8.5, font: thermalRegular),
+          t.row('Waiter', order.waiterName, size: 8.5, font: thermalRegular),
+          pw.SizedBox(height: 3),
+          t.dashedLine(),
+          pw.SizedBox(height: 3),
+          // Column headers
+          t.row('ITEM', 'AMOUNT', size: 8.5, font: thermalBold),
+          pw.SizedBox(height: 2),
+          t.dashedLine(h: 0.6),
+          pw.SizedBox(height: 3),
+          // Items
+          ...order.activeItems.map((item) => pw.Padding(
+            padding: const pw.EdgeInsets.only(bottom: 3),
+            child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+              t.item('${item.menuItem.name} x${item.quantity}',
+                  '${_settings.currencySymbol} ${item.lineTotal.toStringAsFixed(0)}',
+                  size: 9, font: thermalBold),
+              if (item.isDeal && item.dealItems.isNotEmpty)
+                t.sub('  ${_dealSummary(item)}', size: 7, font: thermalRegular),
+              if (item.notes.isNotEmpty)
+                t.sub('  * ${item.notes}', size: 7, font: thermalRegular),
+            ]),
+          )),
+          pw.SizedBox(height: 3),
+          t.dashedLine(),
+          pw.SizedBox(height: 3),
+          t.row('SUBTOTAL', '${_settings.currencySymbol} ${order.subtotal.toStringAsFixed(0)}', size: 9, font: thermalBold),
+          if (order.discountValue > 0)
+            t.row('DISCOUNT', '-${_settings.currencySymbol} ${order.discountValue.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+          if (order.taxValue > 0)
+            t.row('TAX (${order.taxPercent.toStringAsFixed(0)}%)', '${_settings.currencySymbol} ${order.taxValue.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+          if (order.serviceChargeValue > 0)
+            t.row('SERVICE (${order.serviceChargePercent.toStringAsFixed(0)}%)', '${_settings.currencySymbol} ${order.serviceChargeValue.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+          pw.SizedBox(height: 3),
+          t.dashedLine(h: 1.4),
+          pw.SizedBox(height: 3),
+          // Grand total — large and bold
+          t.row('TOTAL', '${_settings.currencySymbol} ${order.grandTotal.toStringAsFixed(0)}', size: 15, font: thermalBold),
+          pw.SizedBox(height: 4),
+          t.dashedLine(),
+          pw.SizedBox(height: 6),
+          t.center(isProforma ? 'Please wait for payment...' : _settings.footerMessage,
+              font: thermalRegular, size: 8),
+          pw.SizedBox(height: 2),
+          t.center('Thank you! Visit again.', font: thermalBold, size: 8),
+          pw.SizedBox(height: 4),
+          t.credit(thermalRegular, 7),
+          pw.SizedBox(height: 10),
         ],
       ),
     ));
@@ -267,76 +410,99 @@ class PrintService {
   }
 
   // ── Internal: Receipt PDF ─────────────────────────
-  Future<Uint8List> _buildReceiptPDF(InvoiceEntity inv, {required PdfPageFormat format}) async {
+  Future<Uint8List> _buildReceiptPDF(PdfPageFormat format, InvoiceEntity inv) async {
+    final t = _layout(format: format);
     final pdf = pw.Document();
-    final font = bold;
-    final fontReg = regular;
-    final width = _mmToPt(_settings.receiptWidth.toDouble());
-
     final logoImg = await _getLogoImage();
+    final stampImg = await _getPaidStampImage();
     pdf.addPage(pw.Page(
-      pageFormat: PdfPageFormat(width, double.infinity, marginAll: _mmToPt(3)),
+      pageFormat: t.pageFormat,
       build: (ctx) => pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          if (logoImg != null)
-            pw.Center(
-              child: pw.Padding(
-                padding: const pw.EdgeInsets.only(bottom: 6),
-                  child: pw.Image(logoImg, width: 65, height: 65, fit: pw.BoxFit.contain),
-              ),
-            ),
-          pw.Center(child: pw.Text(_settings.name, style: pw.TextStyle(font: font, fontSize: 14))),
-          pw.Center(child: pw.Text(_settings.address, style: pw.TextStyle(font: fontReg, fontSize: 8))),
-          pw.Center(child: pw.Text('Tel: ${_settings.phone}', style: pw.TextStyle(font: fontReg, fontSize: 8))),
+          // Logo — top center, compact, original proportions preserved
+          t.header(logo: logoImg, name: _settings.name),
+          if (_settings.address.isNotEmpty)
+            t.center(_settings.address, font: thermalRegular, size: 8),
+          if (_settings.phone.isNotEmpty)
+            t.center(_settings.phone, font: thermalRegular, size: 8),
           pw.SizedBox(height: 4),
-          pw.Center(child: pw.Container(
-            padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-            decoration: pw.BoxDecoration(color: PdfColors.green100, border: pw.Border.all(color: PdfColors.green700)),
-            child: pw.Text('PAID', style: pw.TextStyle(font: font, fontSize: 12, color: PdfColors.green700)),
-          )),
-          pw.SizedBox(height: 4),
-          pw.Divider(thickness: 0.5),
-          _billRow('Invoice', inv.invoiceNumber, font, fontReg),
-          _billRow('Date', _df.format(inv.createdAt), font, fontReg),
-          _billRow('Table', inv.tableName, font, fontReg),
-          _billRow('Order #', inv.orderNumber, font, fontReg),
-          _billRow('Waiter', inv.waiterName, font, fontReg),
-          pw.Divider(thickness: 0.5),
+          t.dashedLine(),
+          pw.SizedBox(height: 3),
+          t.center('*** RECEIPT ***', font: thermalBold, size: 11),
+          pw.SizedBox(height: 3),
+          t.dashedLine(),
+          pw.SizedBox(height: 3),
+          t.row('Invoice', inv.invoiceNumber, size: 8.5, font: thermalRegular),
+          t.row('Date', _df.format(inv.createdAt), size: 8.5, font: thermalRegular),
+          t.row('Table', inv.tableName, size: 8.5, font: thermalRegular),
+          t.row('Order #', inv.orderNumber, size: 8.5, font: thermalRegular),
+          t.row('Waiter', inv.waiterName, size: 8.5, font: thermalRegular),
+          pw.SizedBox(height: 3),
+          t.dashedLine(),
+          pw.SizedBox(height: 3),
+          // Column headers
+          t.row('ITEM', 'AMOUNT', size: 8.5, font: thermalBold),
+          pw.SizedBox(height: 2),
+          t.dashedLine(h: 0.6),
+          pw.SizedBox(height: 3),
+          // Items
           ...inv.items.map((item) => pw.Padding(
-            padding: const pw.EdgeInsets.symmetric(vertical: 1),
+            padding: const pw.EdgeInsets.only(bottom: 3),
             child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-              pw.Row(children: [
-                pw.Expanded(child: pw.Text('${item.quantity}x ${item.menuItem.name}',
-                    style: pw.TextStyle(font: fontReg, fontSize: 9))),
-                pw.Text('${_settings.currencySymbol} ${item.lineTotal.toStringAsFixed(0)}',
-                    style: pw.TextStyle(font: fontReg, fontSize: 9)),
-              ]),
+              t.item('${item.quantity}x ${item.menuItem.name}',
+                  '${_settings.currencySymbol} ${item.lineTotal.toStringAsFixed(0)}',
+                  size: 9, font: thermalBold),
               if (item.isDeal && item.dealItems.isNotEmpty)
-                pw.Text('  ${_dealSummary(item)}',
-                    style: pw.TextStyle(font: fontReg, fontSize: 7, color: PdfColors.grey600)),
+                t.sub('  ${_dealSummary(item)}', size: 7, font: thermalRegular),
+              if (item.notes.isNotEmpty)
+                t.sub('  * ${item.notes}', size: 7, font: thermalRegular),
             ]),
           )),
-          pw.Divider(thickness: 0.5),
-          _totalRow('Subtotal', inv.subtotal, font, fontReg),
-          if (inv.discountValue > 0) _totalRow('Discount', -inv.discountValue, font, fontReg, isNeg: true),
-          if (inv.taxValue > 0) _totalRow('Tax', inv.taxValue, font, fontReg),
-          if (inv.serviceChargeValue > 0) _totalRow('Service', inv.serviceChargeValue, font, fontReg),
-          pw.Divider(thickness: 1),
-          pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
-            pw.Text('TOTAL', style: pw.TextStyle(font: font, fontSize: 12)),
-            pw.Text('${_settings.currencySymbol} ${inv.grandTotal.toStringAsFixed(0)}',
-                style: pw.TextStyle(font: font, fontSize: 12, color: PdfColors.blue800)),
-          ]),
           pw.SizedBox(height: 3),
-          _totalRow('Paid (${_methodLabel(inv.paymentMethod)})', inv.amountPaid, font, fontReg),
-          if (inv.changeAmount > 0) _totalRow('Change', inv.changeAmount, font, fontReg),
-          pw.Divider(thickness: 0.5),
+          t.dashedLine(),
+          pw.SizedBox(height: 3),
+          t.row('SUBTOTAL', '${_settings.currencySymbol} ${inv.subtotal.toStringAsFixed(0)}', size: 9, font: thermalBold),
+          if (inv.discountValue > 0)
+            t.row('DISCOUNT', '-${_settings.currencySymbol} ${inv.discountValue.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+          if (inv.taxValue > 0)
+            t.row('TAX (${_settings.taxPercent.toStringAsFixed(0)}%)', '${_settings.currencySymbol} ${inv.taxValue.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+          if (inv.serviceChargeValue > 0)
+            t.row('SERVICE (${_settings.serviceChargePercent.toStringAsFixed(0)}%)', '${_settings.currencySymbol} ${inv.serviceChargeValue.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+          pw.SizedBox(height: 3),
+          t.dashedLine(h: 1.4),
+          pw.SizedBox(height: 3),
+          // Grand total — large and bold
+          t.row('TOTAL', '${_settings.currencySymbol} ${inv.grandTotal.toStringAsFixed(0)}', size: 15, font: thermalBold),
+          pw.SizedBox(height: 3),
+          t.dashedLine(),
+          pw.SizedBox(height: 3),
+          // Payment section
+          t.center('PAYMENT METHOD: ${_methodLabel(inv.paymentMethod).toUpperCase()}', font: thermalBold, size: 8.5),
+          pw.SizedBox(height: 2),
+          t.row('PAID AMOUNT', '${_settings.currencySymbol} ${inv.amountPaid.toStringAsFixed(0)}', size: 9, font: thermalBold),
+          if (inv.changeAmount > 0)
+            t.row('CHANGE', '${_settings.currencySymbol} ${inv.changeAmount.toStringAsFixed(0)}', size: 9, font: thermalRegular),
           pw.SizedBox(height: 4),
-          pw.Center(child: pw.Text(_settings.footerMessage,
-              style: pw.TextStyle(font: fontReg, fontSize: 8, color: PdfColors.grey600))),
-          pw.Center(child: pw.Text('Thank you! Visit again.',
-              style: pw.TextStyle(font: font, fontSize: 8, color: PdfColors.grey800))),
+          // PAID stamp — centered in the payment section, inline (no overlap)
+          if (stampImg != null)
+            pw.Center(
+              child: pw.Transform.rotate(
+                angle: -0.15,
+                child: pw.Image(stampImg, width: t.contentWidth * 0.5, height: t.contentWidth * 0.16, fit: pw.BoxFit.contain),
+              ),
+            ),
+          pw.SizedBox(height: 4),
+          t.dashedLine(),
+          pw.SizedBox(height: 5),
+          t.center('Thank You For Dining With Us!', font: thermalRegular, size: 8),
+          if (_settings.footerMessage.isNotEmpty)
+            t.center(_settings.footerMessage, font: thermalRegular, size: 8),
+          pw.SizedBox(height: 2),
+          t.center('Thank You! Visit Again', font: thermalBold, size: 8),
+          pw.SizedBox(height: 4),
+          t.credit(thermalRegular, 7),
+          pw.SizedBox(height: 10),
         ],
       ),
     ));
@@ -362,7 +528,7 @@ class PrintService {
               if (logoImg != null)
                 pw.Padding(
                   padding: const pw.EdgeInsets.only(right: 12),
-                  child: pw.Image(logoImg, width: 75, height: 75, fit: pw.BoxFit.contain),
+                  child: pw.Image(logoImg.image, width: 85, height: 85, fit: pw.BoxFit.contain),
                 ),
               pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
                 pw.Text(_settings.name, style: pw.TextStyle(font: font, fontSize: 24, color: PdfColors.blue900)),
@@ -445,240 +611,100 @@ class PrintService {
           pw.Spacer(),
           pw.Divider(),
           pw.Center(child: pw.Text(_settings.footerMessage, style: pw.TextStyle(font: fontReg, fontSize: 10, color: PdfColors.grey700))),
+          pw.Center(child: pw.Text('Software By Engr. Hamza Asad', style: pw.TextStyle(font: fontReg, fontSize: 9, color: PdfColors.black))),
         ],
       ),
     ));
     return pdf.save();
   }
 
-  // ── X Report PDF ──────────────────────────────────
-  Future<Uint8List> _buildXReportPDF(CashRegisterEntity reg, {List<_OrderDetail>? soldItems}) async {
-    final pdf = pw.Document();
-    final font = bold;
-    final fontReg = regular;
-    final logoImg = await _getLogoImage();
-
-    pdf.addPage(pw.Page(
-      pageFormat: PdfPageFormat(_mmToPt(80), double.infinity, marginAll: _mmToPt(4)),
-      build: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-        if (logoImg != null)
-          pw.Center(
-            child: pw.Padding(
-              padding: const pw.EdgeInsets.only(bottom: 4),
-              child: pw.Image(logoImg, width: 40, height: 40, fit: pw.BoxFit.contain),
-            ),
-          ),
-        pw.Center(child: pw.Text(_settings.name, style: pw.TextStyle(font: font, fontSize: 12))),
-        pw.Center(child: pw.Text('X REPORT — CURRENT SHIFT', style: pw.TextStyle(font: font, fontSize: 11))),
-        pw.Center(child: pw.Text('(NO RESET)', style: pw.TextStyle(font: fontReg, fontSize: 9, color: PdfColors.grey600))),
-        pw.Divider(),
-        _rptRow('Shift opened', _df.format(reg.openedAt), font, fontReg),
-        _rptRow('Printed at', _df.format(DateTime.now()), font, fontReg),
-        _rptRow('Opened by', reg.openedBy, font, fontReg),
-        pw.Divider(),
-        pw.Text('SALES', style: pw.TextStyle(font: font, fontSize: 10)),
-        _rptRow('Total orders', '${reg.totalOrders}', font, fontReg),
-        _rptRow('Total sales', '${_settings.currencySymbol} ${reg.totalSales.toStringAsFixed(0)}', font, fontReg),
-        _rptRow('Cash sales', '${_settings.currencySymbol} ${reg.totalCashSales.toStringAsFixed(0)}', font, fontReg),
-        _rptRow('Card sales', '${_settings.currencySymbol} ${reg.totalCardSales.toStringAsFixed(0)}', font, fontReg),
-        _rptRow('Wallet sales', '${_settings.currencySymbol} ${reg.totalWalletSales.toStringAsFixed(0)}', font, fontReg),
-        _rptRow('Credit sales', '${_settings.currencySymbol} ${reg.totalCreditSales.toStringAsFixed(0)}', font, fontReg),
-        pw.Divider(),
-        pw.Text('DEDUCTIONS', style: pw.TextStyle(font: font, fontSize: 10)),
-        _rptRow('Discounts', '${_settings.currencySymbol} ${reg.totalDiscounts.toStringAsFixed(0)}', font, fontReg),
-        _rptRow('Tax collected', '${_settings.currencySymbol} ${reg.totalTax.toStringAsFixed(0)}', font, fontReg),
-        _rptRow('Expenses', '${_settings.currencySymbol} ${reg.totalExpenses.toStringAsFixed(0)}', font, fontReg),
-        _rptRow('Void orders', '${reg.totalVoids}', font, fontReg),
-        pw.Divider(),
-        pw.Text('KITCHEN', style: pw.TextStyle(font: font, fontSize: 10)),
-        _rptRow('Kitchen tickets', '${reg.totalKitchenTickets}', font, fontReg),
-        pw.Divider(),
-        pw.Text('CASH DRAWER', style: pw.TextStyle(font: font, fontSize: 10)),
-        _rptRow('Opening cash', '${_settings.currencySymbol} ${reg.openingCash.toStringAsFixed(0)}', font, fontReg),
-        _rptRow('Cash in', '${_settings.currencySymbol} ${reg.cashIn.toStringAsFixed(0)}', font, fontReg),
-        _rptRow('Cash out', '${_settings.currencySymbol} ${reg.cashOut.toStringAsFixed(0)}', font, fontReg),
-        _rptRow('Expected cash', '${_settings.currencySymbol} ${reg.expectedCash.toStringAsFixed(0)}', font, fontReg),
-        pw.Divider(),
-        // Per-order items
-        if (soldItems != null && soldItems.isNotEmpty) ...[
-          pw.Text('ORDERED ITEMS', style: pw.TextStyle(font: font, fontSize: 10)),
-          pw.SizedBox(height: 4),
-          ...soldItems.expand((order) => [
-            pw.Padding(
-              padding: const pw.EdgeInsets.only(top: 4),
-              child: pw.Row(children: [
-                pw.Text('#${order.orderNumber}', style: pw.TextStyle(font: font, fontSize: 9)),
-                pw.SizedBox(width: 6),
-                pw.Text(order.tableName, style: pw.TextStyle(font: fontReg, fontSize: 8, color: PdfColors.grey600)),
-                pw.Spacer(),
-                pw.Text('${_settings.currencySymbol} ${order.total.toStringAsFixed(0)}',
-                    style: pw.TextStyle(font: font, fontSize: 9)),
-              ]),
-            ),
-            ...order.items.map((item) => pw.Padding(
-              padding: const pw.EdgeInsets.only(left: 12, bottom: 1),
-              child: pw.Row(children: [
-                pw.Expanded(child: pw.Text(item.name, style: pw.TextStyle(font: fontReg, fontSize: 8))),
-                pw.Text('×${item.qty}', style: pw.TextStyle(font: fontReg, fontSize: 8)),
-                pw.SizedBox(width: 6),
-                pw.SizedBox(width: 50, child: pw.Text(
-                    '${_settings.currencySymbol} ${(item.price * item.qty).toStringAsFixed(0)}',
-                    textAlign: pw.TextAlign.right, style: pw.TextStyle(font: fontReg, fontSize: 8))),
-              ]),
-            )),
-          ]),
-          pw.Divider(),
-        ],
-        pw.Center(child: pw.Text('— End of X Report —', style: pw.TextStyle(font: fontReg, fontSize: 9))),
-      ]),
-    ));
-    return pdf.save();
-  }
-
   // ── Z Report PDF ──────────────────────────────────
-  Future<Uint8List> _buildZReportPDF(CashRegisterEntity reg, double closingCash, {List<_OrderDetail>? soldItems}) async {
+  Future<Uint8List> _buildZReportPDF(PdfPageFormat format, CashRegisterEntity reg, double closingCash, ReportData data) async {
+    final t = _layout(format: format);
     final pdf = pw.Document();
-    final font = bold;
-    final fontReg = regular;
     final diff = closingCash - reg.expectedCash;
     final logoImg = await _getLogoImage();
+    final sym = _settings.currencySymbol;
 
     pdf.addPage(pw.Page(
-      pageFormat: PdfPageFormat(_mmToPt(80), double.infinity, marginAll: _mmToPt(4)),
+      pageFormat: t.pageFormat,
       build: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-        if (logoImg != null)
-          pw.Center(
-            child: pw.Padding(
-              padding: const pw.EdgeInsets.only(bottom: 4),
-              child: pw.Image(logoImg, width: 40, height: 40, fit: pw.BoxFit.contain),
-            ),
-          ),
-        pw.Center(child: pw.Text(_settings.name, style: pw.TextStyle(font: font, fontSize: 12))),
-        pw.Center(child: pw.Text('Z REPORT — END OF DAY', style: pw.TextStyle(font: font, fontSize: 11))),
-        pw.Center(child: pw.Text('*** SHIFT CLOSED ***', style: pw.TextStyle(font: font, fontSize: 10, color: PdfColors.red700))),
-        pw.Divider(thickness: 1),
-        _rptRow('Date', _dtf.format(DateTime.now()), font, fontReg),
-        _rptRow('Opened', _df.format(reg.openedAt), font, fontReg),
-        _rptRow('Closed', _df.format(DateTime.now()), font, fontReg),
-        _rptRow('Duration', _formatDuration(DateTime.now().difference(reg.openedAt)), font, fontReg),
-        pw.Divider(),
-        pw.Text('SALES SUMMARY', style: pw.TextStyle(font: font, fontSize: 10)),
-        _rptRow('Total orders', '${reg.totalOrders}', font, fontReg),
-        _rptRow('Gross sales', '${_settings.currencySymbol} ${reg.totalSales.toStringAsFixed(0)}', font, fontReg),
-        _rptRow('Discounts', '-${_settings.currencySymbol} ${reg.totalDiscounts.toStringAsFixed(0)}', font, fontReg),
-        _rptRow('Tax collected', '${_settings.currencySymbol} ${reg.totalTax.toStringAsFixed(0)}', font, fontReg),
-        pw.Divider(),
-        pw.Text('PAYMENT BREAKDOWN', style: pw.TextStyle(font: font, fontSize: 10)),
-        _rptRow('Cash', '${_settings.currencySymbol} ${reg.totalCashSales.toStringAsFixed(0)}', font, fontReg),
-        _rptRow('Card', '${_settings.currencySymbol} ${reg.totalCardSales.toStringAsFixed(0)}', font, fontReg),
-        _rptRow('Wallet', '${_settings.currencySymbol} ${reg.totalWalletSales.toStringAsFixed(0)}', font, fontReg),
-        _rptRow('Credit', '${_settings.currencySymbol} ${reg.totalCreditSales.toStringAsFixed(0)}', font, fontReg),
-        pw.Divider(),
-        pw.Text('CASH RECONCILIATION', style: pw.TextStyle(font: font, fontSize: 10)),
-        _rptRow('Opening cash', '${_settings.currencySymbol} ${reg.openingCash.toStringAsFixed(0)}', font, fontReg),
-        _rptRow('Cash sales', '${_settings.currencySymbol} ${reg.totalCashSales.toStringAsFixed(0)}', font, fontReg),
-        _rptRow('Cash in', '+${_settings.currencySymbol} ${reg.cashIn.toStringAsFixed(0)}', font, fontReg),
-        _rptRow('Cash out', '-${_settings.currencySymbol} ${reg.cashOut.toStringAsFixed(0)}', font, fontReg),
-        _rptRow('Expenses', '-${_settings.currencySymbol} ${reg.totalExpenses.toStringAsFixed(0)}', font, fontReg),
-        pw.Divider(thickness: 1),
-        _rptRow('Expected cash', '${_settings.currencySymbol} ${reg.expectedCash.toStringAsFixed(0)}', font, font),
-        _rptRow('Actual cash', '${_settings.currencySymbol} ${closingCash.toStringAsFixed(0)}', font, font),
-        pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
-          pw.Text('DIFFERENCE', style: pw.TextStyle(font: font, fontSize: 11)),
-          pw.Text('${diff >= 0 ? '+' : ''}${_settings.currencySymbol} ${diff.toStringAsFixed(0)}',
-              style: pw.TextStyle(font: font, fontSize: 11,
-                  color: diff.abs() < 10 ? PdfColors.green700 : PdfColors.red700)),
-        ]),
-        pw.Divider(),
-        pw.Text('KITCHEN', style: pw.TextStyle(font: font, fontSize: 10)),
-        _rptRow('Kitchen tickets printed', '${reg.totalKitchenTickets}', font, fontReg),
-        _rptRow('Void transactions', '${reg.totalVoids}', font, fontReg),
-        pw.Divider(),
-        if (soldItems != null && soldItems.isNotEmpty) ...[
-          pw.Text('ORDERED ITEMS', style: pw.TextStyle(font: font, fontSize: 10)),
-          pw.SizedBox(height: 4),
-          ...soldItems.expand((order) => [
-            pw.Padding(
-              padding: const pw.EdgeInsets.only(top: 4),
-              child: pw.Row(children: [
-                pw.Text('#${order.orderNumber}', style: pw.TextStyle(font: font, fontSize: 9)),
-                pw.SizedBox(width: 6),
-                pw.Text(order.tableName, style: pw.TextStyle(font: fontReg, fontSize: 8, color: PdfColors.grey600)),
-                pw.Spacer(),
-                pw.Text('${_settings.currencySymbol} ${order.total.toStringAsFixed(0)}',
-                    style: pw.TextStyle(font: font, fontSize: 9)),
-              ]),
-            ),
-            ...order.items.map((item) => pw.Padding(
-              padding: const pw.EdgeInsets.only(left: 12, bottom: 1),
-              child: pw.Row(children: [
-                pw.Expanded(child: pw.Text(item.name, style: pw.TextStyle(font: fontReg, fontSize: 8))),
-                pw.Text('×${item.qty}', style: pw.TextStyle(font: fontReg, fontSize: 8)),
-                pw.SizedBox(width: 6),
-                pw.SizedBox(width: 50, child: pw.Text(
-                    '${_settings.currencySymbol} ${(item.price * item.qty).toStringAsFixed(0)}',
-                    textAlign: pw.TextAlign.right, style: pw.TextStyle(font: fontReg, fontSize: 8))),
-              ]),
-            )),
-          ]),
-          pw.Divider(),
-        ],
-        pw.Divider(thickness: 1),
-        pw.Center(child: pw.Text('*** END OF DAY — COUNTERS RESET ***', style: pw.TextStyle(font: font, fontSize: 9, color: PdfColors.red700))),
-        pw.Center(child: pw.Text(_df.format(DateTime.now()), style: pw.TextStyle(font: fontReg, fontSize: 8))),
+        t.header(logo: logoImg, name: _settings.name, title: 'Z REPORT', subtitle: '*** SHIFT CLOSED ***'),
+        pw.SizedBox(height: 4),
+        t.dashedLine(h: 1.2),
+        t.row('Date', _dtf.format(DateTime.now()), size: 9, font: thermalRegular),
+        t.row('Opened', _df.format(reg.openedAt), size: 9, font: thermalRegular),
+        t.row('Closed', _df.format(DateTime.now()), size: 9, font: thermalRegular),
+        t.row('Duration', _formatDuration(DateTime.now().difference(reg.openedAt)), size: 9, font: thermalRegular),
+        t.dashedLine(),
+        t.section('SALES SUMMARY', font: thermalBold),
+        t.row('Total orders', '${data.completedOrders}', size: 9, font: thermalRegular),
+        t.row('Gross sales', '$sym ${reg.totalSales.toStringAsFixed(0)}', size: 9, font: thermalBold),
+        t.row('Discounts', '-$sym ${reg.totalDiscounts.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+        t.row('Tax collected', '$sym ${reg.totalTax.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+        t.dashedLine(),
+        t.section('PAYMENT BREAKDOWN', font: thermalBold),
+        t.row('Cash', '$sym ${reg.totalCashSales.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+        t.row('Card', '$sym ${reg.totalCardSales.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+        t.row('Wallet', '$sym ${reg.totalWalletSales.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+        t.row('Credit', '$sym ${reg.totalCreditSales.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+        t.dashedLine(),
+        t.section('CASH RECONCILIATION', font: thermalBold),
+        t.row('Opening cash', '$sym ${reg.openingCash.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+        t.row('Cash sales', '$sym ${reg.totalCashSales.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+        t.row('Cash in', '+$sym ${reg.cashIn.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+        t.row('Cash out', '-$sym ${reg.cashOut.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+        t.row('Expenses', '-$sym ${reg.totalExpenses.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+        t.dashedLine(h: 1.2),
+        t.row('Expected cash', '$sym ${reg.expectedCash.toStringAsFixed(0)}', size: 9, font: thermalBold),
+        t.row('Actual cash', '$sym ${closingCash.toStringAsFixed(0)}', size: 9, font: thermalBold),
+        t.row('DIFFERENCE', '${diff >= 0 ? '+' : ''}$sym ${diff.toStringAsFixed(0)}', size: 11, font: thermalBold),
+        t.dashedLine(),
+        t.section('KITCHEN', font: thermalBold),
+        t.row('Tickets printed', '${reg.totalKitchenTickets}', size: 9, font: thermalRegular),
+        t.row('Void transactions', '${reg.totalVoids}', size: 9, font: thermalRegular),
+        pw.SizedBox(height: 4),
+        t.dashedLine(h: 1.2),
+        pw.SizedBox(height: 4),
+        t.center('*** END OF DAY — COUNTERS RESET ***', font: thermalBold, size: 9),
+        t.center(_df.format(DateTime.now()), font: thermalRegular, size: 8),
+        t.credit(thermalRegular, 7),
       ]),
     ));
     return pdf.save();
   }
 
-  Future<pw.MemoryImage?> _getLogoImage() async {
+  Future<ThermalLogo?> _getLogoImage() async {
     if (_settings.logoPath != null && _settings.logoPath!.isNotEmpty) {
       final resolvedPath = AppPaths.resolve(_settings.logoPath!);
       final file = File(resolvedPath);
       if (file.existsSync()) {
         try {
           final bytes = file.readAsBytesSync();
-          return pw.MemoryImage(bytes);
+          return ThermalLogo(pw.MemoryImage(bytes));
         } catch (_) {}
       }
     }
     return null;
   }
 
+  // Bundled "PAID" stamp, loaded from assets/images/paid_stamp.png.
+  Future<pw.MemoryImage?> _getPaidStampImage() async {
+    try {
+      final data = await rootBundle.load('assets/images/paid_stamp.png');
+      return pw.MemoryImage(data.buffer.asUint8List());
+    } catch (_) {
+      return null;
+    }
+  }
+
   // ── Helpers ───────────────────────────────────────
-  double _mmToPt(double mm) => mm * 2.8346;
-
-  pw.Widget _billRow(String label, String val, pw.Font b, pw.Font r) => pw.Padding(
-    padding: const pw.EdgeInsets.symmetric(vertical: 1),
-    child: pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
-      pw.Text(label, style: pw.TextStyle(font: r, fontSize: 8)),
-      pw.Text(val, style: pw.TextStyle(font: b, fontSize: 8)),
-    ]),
-  );
-
-  pw.Widget _totalRow(String label, double val, pw.Font b, pw.Font r, {bool isNeg = false}) => pw.Padding(
-    padding: const pw.EdgeInsets.symmetric(vertical: 1),
-    child: pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
-      pw.Text(label, style: pw.TextStyle(font: r, fontSize: 9)),
-      pw.Text('${isNeg ? '-' : ''}${_settings.currencySymbol} ${val.abs().toStringAsFixed(0)}',
-          style: pw.TextStyle(font: b, fontSize: 9, color: isNeg ? PdfColors.green700 : null)),
-    ]),
-  );
-
   pw.Widget _a4TotalRow(String label, double val, pw.Font b, pw.Font r) => pw.Padding(
     padding: const pw.EdgeInsets.symmetric(vertical: 2),
     child: pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
       pw.Text(label, style: pw.TextStyle(font: r, fontSize: 10)),
       pw.Text('${_settings.currencySymbol} ${val.abs().toStringAsFixed(0)}',
           style: pw.TextStyle(font: b, fontSize: 10, color: val < 0 ? PdfColors.green700 : null)),
-    ]),
-  );
-
-  pw.Widget _rptRow(String label, String val, pw.Font b, pw.Font r) => pw.Padding(
-    padding: const pw.EdgeInsets.symmetric(vertical: 2),
-    child: pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
-      pw.Text(label, style: pw.TextStyle(font: r, fontSize: 9)),
-      pw.Text(val, style: pw.TextStyle(font: b, fontSize: 9)),
     ]),
   );
 
@@ -696,19 +722,4 @@ class PrintService {
     final m = d.inMinutes % 60;
     return '${h}h ${m}m';
   }
-}
-
-class _OrderDetail {
-  final String tableName;
-  final String orderNumber;
-  final List<_OrderItemDetail> items;
-  final double total;
-  const _OrderDetail({required this.tableName, required this.orderNumber, required this.items, required this.total});
-}
-
-class _OrderItemDetail {
-  final String name;
-  final int qty;
-  final double price;
-  const _OrderItemDetail({required this.name, required this.qty, required this.price});
 }

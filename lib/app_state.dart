@@ -139,6 +139,8 @@ class SettingsNotifier extends StateNotifier<RestaurantSettings> {
       serviceChargePercent: double.tryParse(s['service_charge_percent'] ?? '') ?? 10.0,
       currencySymbol: s['currency_symbol'] ?? 'Rs',
       receiptWidth: int.tryParse(s['receipt_width'] ?? '') ?? 80,
+      printerMode: s['printer_mode'] ?? 'pdf',
+      selectedPrinterName: s['selected_printer'] ?? '',
       autoKitchenPrint: s['auto_kitchen_print'] != 'false',
       autoPrintBillOnPay: s['auto_print_bill_on_pay'] != 'false',
       autoBackupEnabled: s['auto_backup_enabled'] == 'true',
@@ -162,6 +164,8 @@ class SettingsNotifier extends StateNotifier<RestaurantSettings> {
     await _db.settingsDao.set('service_charge_percent', s.serviceChargePercent.toString());
     await _db.settingsDao.set('currency_symbol', s.currencySymbol);
     await _db.settingsDao.set('receipt_width', s.receiptWidth.toString());
+    await _db.settingsDao.set('printer_mode', s.printerMode);
+    await _db.settingsDao.set('selected_printer', s.selectedPrinterName);
     await _db.settingsDao.set('auto_kitchen_print', s.autoKitchenPrint.toString());
     await _db.settingsDao.set('auto_print_bill_on_pay', s.autoPrintBillOnPay.toString());
     await _db.settingsDao.set('auto_backup_enabled', s.autoBackupEnabled.toString());
@@ -707,7 +711,11 @@ class KitchenNotifier extends StateNotifier<KitchenState> {
   Future<void> _load() async {
     final rows = await _db.orderDao.kitchenPending();
     final active = await Future.wait(rows.map((r) => _buildOrder(_db, r)));
-    final doneRows = await _db.orderDao.doneToday();
+    // Done orders reset per register session: only orders paid since the
+    // currently open register was opened (starts from zero on new register).
+    final reg = await _db.registerDao.openRegister();
+    final since = reg?.openedAt ?? DateTime.now().subtract(const Duration(days: 1));
+    final doneRows = await _db.orderDao.doneToday(since);
     final done = await Future.wait(doneRows.map((r) => _buildOrder(_db, r)));
     state = KitchenState(active: active, done: done);
   }

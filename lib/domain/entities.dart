@@ -455,6 +455,8 @@ class RestaurantSettings {
     this.serviceChargePercent = 10.0,
     this.currencySymbol = 'Rs',
     this.receiptWidth = 80,
+    this.printerMode = 'pdf',
+    this.selectedPrinterName = '',
     this.autoKitchenPrint = true,
     this.autoPrintBillOnPay = true,
     this.autoBackupEnabled = false,
@@ -476,6 +478,8 @@ class RestaurantSettings {
   final double serviceChargePercent;
   final String currencySymbol;
   final int receiptWidth;
+  final String printerMode;
+  final String selectedPrinterName;
   final bool autoKitchenPrint;
   final bool autoPrintBillOnPay;
   final bool autoBackupEnabled;
@@ -490,6 +494,7 @@ class RestaurantSettings {
     String? taxNumber, String? footerMessage, String? logoPath,
     double? taxPercent, double? serviceChargePercent, String? currencySymbol,
     int? receiptWidth, bool? autoKitchenPrint, bool? autoPrintBillOnPay,
+    String? printerMode, String? selectedPrinterName,
     bool? autoBackupEnabled, String? autoBackupInterval, String? autoBackupDestFolder,
     String? autoBackupLastTime, String? autoBackupNextTime, String? autoBackupStatus,
   }) => RestaurantSettings(
@@ -502,6 +507,8 @@ class RestaurantSettings {
     serviceChargePercent: serviceChargePercent ?? this.serviceChargePercent,
     currencySymbol: currencySymbol ?? this.currencySymbol,
     receiptWidth: receiptWidth ?? this.receiptWidth,
+    printerMode: printerMode ?? this.printerMode,
+    selectedPrinterName: selectedPrinterName ?? this.selectedPrinterName,
     autoKitchenPrint: autoKitchenPrint ?? this.autoKitchenPrint,
     autoPrintBillOnPay: autoPrintBillOnPay ?? this.autoPrintBillOnPay,
     autoBackupEnabled: autoBackupEnabled ?? this.autoBackupEnabled,

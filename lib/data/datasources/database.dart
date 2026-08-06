@@ -417,13 +417,22 @@ class OrderDao extends DatabaseAccessor<AppDatabase> with _$OrderDaoMixin {
   Future<void> removeItem(int id) => (delete(orderItems)..where((i) => i.id.equals(id))).go();
   Future<List<OrderRow>> forPeriod(DateTime start, DateTime end) =>
     (select(orders)..where((o) => o.createdAt.isBetweenValues(start, end))..orderBy([(o) => OrderingTerm.desc(o.createdAt)])).get();
+  Future<bool> hasOrdersForTable(int tableId) async {
+    final countExp = orders.id.count();
+    final query = selectOnly(orders)
+      ..addColumns([countExp])
+      ..where(orders.tableId.equals(tableId));
+    final result = await query.getSingle();
+    final count = result.read(countExp);
+    return count != null && count > 0;
+  }
   // Kitchen: orders sent to the kitchen (not yet paid)
   Future<List<OrderRow>> kitchenPending() =>
     (select(orders)..where((o) => o.status.equals('kitchenSent'))..orderBy([(o) => OrderingTerm.asc(o.createdAt)])).get();
-  // Kitchen: recently paid (done) orders
-  Future<List<OrderRow>> doneToday() =>
+  // Kitchen: recently paid (done) orders — since the current register opened
+  Future<List<OrderRow>> doneToday(DateTime since) =>
     (select(orders)
-      ..where((o) => o.status.equals('paid') & o.paidAt.isBiggerThanValue(DateTime.now().subtract(const Duration(days: 1))))
+      ..where((o) => o.status.equals('paid') & o.paidAt.isBiggerThanValue(since))
       ..orderBy([(o) => OrderingTerm.desc(o.paidAt)])).get();
 }
 

@@ -43,23 +43,35 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
               final sel = f.id == _selectedFloorId;
               return Padding(
                 padding: const EdgeInsets.only(right: 6),
-                child: GestureDetector(
-                  onTap: () => setState(() => _selectedFloorId = f.id),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                    decoration: BoxDecoration(
-                      color: sel ? context.cs.primary : context.elevated,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: sel ? context.cs.primary : context.border),
+                child: Stack(clipBehavior: Clip.none, children: [
+                  GestureDetector(
+                    onTap: () => setState(() => _selectedFloorId = f.id),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: sel ? context.cs.primary : context.elevated,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: sel ? context.cs.primary : context.border),
+                      ),
+                      child: Text(f.name, style: TextStyle(
+                        color: sel ? Colors.white : context.cs.onSurface,
+                        fontWeight: sel ? FontWeight.w600 : FontWeight.w400,
+                        fontSize: 13,
+                      )),
                     ),
-                    child: Text(f.name, style: TextStyle(
-                      color: sel ? Colors.white : context.cs.onSurface,
-                      fontWeight: sel ? FontWeight.w600 : FontWeight.w400,
-                      fontSize: 13,
-                    )),
                   ),
-                ),
+                  if (_editMode)
+                    Positioned(top: -6, right: -5, child: GestureDetector(
+                      onTap: () => _deleteFloor(f),
+                      child: Container(
+                        width: 17, height: 17,
+                        decoration: BoxDecoration(color: Colors.red.shade600, shape: BoxShape.circle,
+                          border: Border.all(color: context.elevated, width: 1.5)),
+                        child: const Icon(Icons.close, size: 11, color: Colors.white),
+                      ),
+                    )),
+                ]),
               );
             }).toList()),
             loading: () => const SizedBox(),
@@ -257,6 +269,60 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
     }
   }
 
+  Future<void> _deleteFloor(FloorEntity floor) async {
+    final db = ref.read(dbProvider);
+    if ((await db.tableDao.allFloors()).length <= 1) {
+      if (mounted) showError(context, 'You need at least one floor.');
+      return;
+    }
+    final tables = await db.tableDao.watchByFloor(floor.id).first;
+    if (tables.isNotEmpty) {
+      for (final t in tables) {
+        if (await db.orderDao.hasOrdersForTable(t.id)) {
+          if (mounted) showError(context,
+              'Floor "${floor.name}" contains tables with order history and cannot be deleted.');
+          return;
+        }
+      }
+      final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
+        title: const Text('Delete floor'),
+        content: Text('Delete "${floor.name}"? Its ${tables.length} table(s) will also be deleted.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade600),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ));
+      if (ok != true) return;
+      for (final t in tables) {
+        await (db.delete(db.restaurantTables)..where((x) => x.id.equals(t.id))).go();
+      }
+    } else {
+      final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
+        title: const Text('Delete floor'),
+        content: Text('Delete "${floor.name}"?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade600),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ));
+      if (ok != true) return;
+    }
+    await (db.delete(db.floors)..where((f) => f.id.equals(floor.id))).go();
+    if (mounted && _selectedFloorId == floor.id) {
+      final remaining = await db.tableDao.allFloors();
+      setState(() => _selectedFloorId = remaining.isNotEmpty ? remaining.first.id : -1);
+    }
+    ref.invalidate(floorsProvider);
+  }
+
   Future<void> _addTable() async {
     if (_selectedFloorId == -1) return;
     final db = ref.read(dbProvider);
@@ -394,30 +460,68 @@ class _TableWidgetState extends ConsumerState<_TableWidget> with SingleTickerPro
             border: Border.all(color: c, width: widget.editMode ? 2 : 1.5),
             boxShadow: t.isOccupied ? [BoxShadow(color: c.withAlpha(60), blurRadius: 8, spreadRadius: 1)] : null,
           ),
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(t.isOccupied ? Icons.person_rounded : Icons.table_restaurant_rounded, color: c, size: 18),
-            const SizedBox(height: 3),
-            Text(t.name, style: TextStyle(color: c, fontWeight: FontWeight.w800, fontSize: 13)),
-            if (t.isOccupied) ...[
-              if (t.runningTotal > 0)
-                Consumer(builder: (_, ref, __) => Text(
-                  '${ref.watch(settingsProvider).currencySymbol} ${t.runningTotal.toStringAsFixed(0)}',
-                  style: TextStyle(fontSize: 10, color: c.withAlpha(200)))),
-              if (t.waiterName != null)
-                Text(t.waiterName!.split(' ').first, style: TextStyle(fontSize: 9, color: c.withAlpha(170))),
-            ],
-            const SizedBox(height: 3),
-            if (t.isOccupied)
-              FadeTransition(
-                opacity: Tween(begin: 0.4, end: 1.0).animate(_pulse),
-                child: Container(width: 7, height: 7, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
-              )
-            else
-              Container(width: 7, height: 7, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
+          child: Stack(fit: StackFit.expand, alignment: Alignment.center, children: [
+            Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Icon(t.isOccupied ? Icons.person_rounded : Icons.table_restaurant_rounded, color: c, size: 18),
+              const SizedBox(height: 3),
+              Text(t.name, style: TextStyle(color: c, fontWeight: FontWeight.w800, fontSize: 13)),
+              if (t.isOccupied) ...[
+                if (t.runningTotal > 0)
+                  Consumer(builder: (_, ref, __) => Text(
+                    '${ref.watch(settingsProvider).currencySymbol} ${t.runningTotal.toStringAsFixed(0)}',
+                    style: TextStyle(fontSize: 10, color: c.withAlpha(200)))),
+                if (t.waiterName != null)
+                  Text(t.waiterName!.split(' ').first, style: TextStyle(fontSize: 9, color: c.withAlpha(170))),
+              ],
+              const SizedBox(height: 3),
+              if (t.isOccupied)
+                FadeTransition(
+                  opacity: Tween(begin: 0.4, end: 1.0).animate(_pulse),
+                  child: Container(width: 7, height: 7, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
+                )
+              else
+                Container(width: 7, height: 7, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
+            ]),
+            if (widget.editMode)
+              Positioned(top: 3, right: 3, child: GestureDetector(
+                onTap: () => _deleteTable(ref, t),
+                child: Container(
+                  width: 19, height: 19,
+                  decoration: BoxDecoration(color: Colors.red.shade600, shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 1.5)),
+                  child: const Icon(Icons.close, size: 12, color: Colors.white),
+                ),
+              )),
           ]),
         ),
       ),
     );
+  }
+
+  Future<void> _deleteTable(WidgetRef ref, TableEntity table) async {
+    if (table.isOccupied) {
+      showError(context, 'Table ${table.name} has an open order. Settle the bill before deleting.');
+      return;
+    }
+    final db = ref.read(dbProvider);
+    if (await db.orderDao.hasOrdersForTable(table.id)) {
+      showError(context, 'Table ${table.name} has order history and cannot be deleted.');
+      return;
+    }
+    final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
+      title: const Text('Delete table'),
+      content: Text('Delete "${table.name}"? This cannot be undone.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: Colors.red.shade600),
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Delete'),
+        ),
+      ],
+    ));
+    if (ok != true) return;
+    await (db.delete(db.restaurantTables)..where((x) => x.id.equals(table.id))).go();
   }
 }
 
@@ -619,20 +723,34 @@ class _POSScreenState extends ConsumerState<POSScreen> {
     final order = ref.read(posProvider(widget.tableId)).valueOrNull;
     if (order == null) return;
     await ref.read(posProvider(widget.tableId).notifier).sendToKitchen();
-    // Print kitchen ticket (respects auto-print setting)
+    // Print kitchen ticket (respects auto-print setting).
+    // Ticket number comes from the current register session, so it
+    // restarts from 1 whenever a new register is opened.
     final settings = ref.read(settingsProvider);
     if (settings.autoKitchenPrint) {
-      await PrintService.instance.printKitchenTicket(order);
+      try {
+        final reg = await ref.read(dbProvider).registerDao.openRegister();
+        await PrintService.instance.printKitchenTicket(order, ticketNumber: reg?.totalKitchenTickets);
+        if (mounted) showSuccess(context, 'Sent to kitchen & ticket printed');
+      } catch (e) {
+        if (mounted) showError(context, 'Sent to kitchen. Ticket print failed: ${e is PrintException ? e.message : e}');
+      }
+    } else {
+      if (mounted) showSuccess(context, 'Sent to kitchen');
     }
-    if (mounted) showSuccess(context, settings.autoKitchenPrint ? 'Sent to kitchen & ticket printed' : 'Sent to kitchen');
   }
 
   Future<void> _printBill() async {
     final order = ref.read(posProvider(widget.tableId)).valueOrNull;
     if (order == null) return;
     await ref.read(posProvider(widget.tableId).notifier).printProformaBill();
-    await PrintService.instance.printProformaBill(order);
-    if (mounted) showSuccess(context, 'Bill printed');
+    try {
+      await PrintService.instance.printProformaBill(order);
+      final isPdf = ref.read(settingsProvider).printerMode != 'thermal';
+      if (mounted) showSuccess(context, isPdf ? 'PDF generated successfully.' : 'Bill printed successfully.');
+    } catch (e) {
+      if (mounted) showError(context, e is PrintException ? e.message : 'Print failed: $e');
+    }
   }
 
   Future<void> _transferTable() async {
@@ -782,12 +900,21 @@ class _POSScreenState extends ConsumerState<POSScreen> {
           if (inv != null) {
             // Print final receipt (respects auto-print setting)
             final autoPrint = ref.read(settingsProvider).autoPrintBillOnPay;
+            var printed = false;
             if (autoPrint) {
-              await PrintService.instance.printFinalReceipt(inv);
+              try {
+                await PrintService.instance.printFinalReceipt(inv);
+                printed = true;
+              } catch (e) {
+                if (mounted) showError(context, e is PrintException ? e.message : 'Receipt print failed: $e');
+              }
             }
             if (mounted) {
               Navigator.of(context).pop();
-              showSuccess(context, autoPrint ? 'Payment done! Receipt printed.' : 'Payment done!');
+              final isPdf = ref.read(settingsProvider).printerMode != 'thermal';
+              showSuccess(context, printed
+                  ? (isPdf ? 'Payment done! Receipt PDF generated.' : 'Payment done! Receipt printed.')
+                  : 'Payment done!');
               context.go('/floor');
             }
           }

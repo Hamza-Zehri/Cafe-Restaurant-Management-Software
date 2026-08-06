@@ -586,12 +586,11 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
         ],
         bottom: TabBar(
           controller: _tab,
-          tabs: const [Tab(text: 'Sales Summary'), Tab(text: 'X Report'), Tab(text: 'Z Report')],
+          tabs: const [Tab(text: 'Sales Summary'), Tab(text: 'Z Report')],
         ),
       ),
       body: TabBarView(controller: _tab, children: [
         _SalesSummaryTab(range: _range),
-        _XReportTab(range: _range),
         _ZReportTab(),
       ]),
     ));
@@ -742,82 +741,6 @@ class _ReportKPI extends StatelessWidget {
       ])),
     ]),
   );
-}
-
-class _XReportTab extends ConsumerWidget {
-  const _XReportTab({required this.range});
-  final DateTimeRange range;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final register = ref.watch(registerProvider);
-    final sym = ref.watch(settingsProvider).currencySymbol;
-
-    if (register == null) return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-      const Icon(Icons.lock_clock_rounded, size: 64, color: Colors.orange),
-      const SizedBox(height: 14),
-      const Text('No open register', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-      const SizedBox(height: 6),
-      Text('Open the cash register first', style: TextStyle(color: context.cs.onSurfaceVariant)),
-      const SizedBox(height: 20),
-      FilledButton(onPressed: () => context.go('/cash-register'), child: const Text('Go to register')),
-    ]));
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Center(child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 600),
-        child: AppCard(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            // Header
-            Row(children: [
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('X REPORT — Current Shift', style: context.tt.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-                Text('No reset · reads current totals', style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 12)),
-              ]),
-              const Spacer(),
-              FilledButton.icon(
-                icon: const Icon(Icons.print_rounded, size: 16),
-                label: const Text('Print X Report'),
-                onPressed: () => PrintService.instance.printXReport(register),
-              ),
-            ]),
-            const Divider(height: 28),
-            _XRow('Shift opened', DateFormat('dd/MM/yyyy HH:mm').format(register.openedAt)),
-            _XRow('Opened by', register.openedBy),
-            _XRow('Report time', DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now())),
-            const Divider(height: 20),
-            _XSection('SALES', [
-              ('Total orders', '${register.totalOrders}'),
-              ('Total sales', '$sym ${register.totalSales.toStringAsFixed(0)}'),
-              ('Cash sales', '$sym ${register.totalCashSales.toStringAsFixed(0)}'),
-              ('Card sales', '$sym ${register.totalCardSales.toStringAsFixed(0)}'),
-              ('Wallet sales', '$sym ${register.totalWalletSales.toStringAsFixed(0)}'),
-              ('Credit sales', '$sym ${register.totalCreditSales.toStringAsFixed(0)}'),
-            ]),
-            const SizedBox(height: 14),
-            _XSection('DEDUCTIONS', [
-              ('Total discounts', '$sym ${register.totalDiscounts.toStringAsFixed(0)}'),
-              ('Tax collected', '$sym ${register.totalTax.toStringAsFixed(0)}'),
-              ('Total expenses', '$sym ${register.totalExpenses.toStringAsFixed(0)}'),
-              ('Void orders', '${register.totalVoids}'),
-            ]),
-            const SizedBox(height: 14),
-            _XSection('KITCHEN', [
-              ('Kitchen tickets printed', '${register.totalKitchenTickets}'),
-            ]),
-            const SizedBox(height: 14),
-            _XSection('CASH DRAWER', [
-              ('Opening cash', '$sym ${register.openingCash.toStringAsFixed(0)}'),
-              ('Cash in', '$sym ${register.cashIn.toStringAsFixed(0)}'),
-              ('Cash out', '$sym ${register.cashOut.toStringAsFixed(0)}'),
-              ('Expected cash', '$sym ${register.expectedCash.toStringAsFixed(0)}'),
-            ]),
-          ]),
-        ),
-      )),
-    );
-  }
 }
 
 class _XRow extends StatelessWidget {
@@ -1566,6 +1489,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   static const _sections = [
     (Icons.store_outlined, 'Restaurant Info'),
     (Icons.receipt_long_outlined, 'Receipt & Tax'),
+    (Icons.print_outlined, 'Printer'),
     (Icons.palette_outlined, 'Theme'),
     (Icons.backup_outlined, 'Backup'),
     (Icons.people_outlined, 'User Accounts'),
@@ -1617,6 +1541,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         Expanded(child: [
           _RestaurantInfoSettings(settings: settings),
           _ReceiptTaxSettings(settings: settings),
+          _PrinterSettings(settings: settings),
           _ThemeSettings(),
           _BackupSettings(),
           _UserAccountsSettings(),
@@ -1800,6 +1725,200 @@ class _ReceiptTaxSettingsState extends ConsumerState<_ReceiptTaxSettings> {
       ),
     ]),
   );
+}
+
+class _PrinterSettings extends ConsumerStatefulWidget {
+  const _PrinterSettings({required this.settings});
+  final RestaurantSettings settings;
+  @override ConsumerState<_PrinterSettings> createState() => _PrinterSettingsState();
+}
+
+class _PrinterSettingsState extends ConsumerState<_PrinterSettings> {
+  String _mode = 'pdf';
+  String _selected = '';
+  List<Printer> _printers = const [];
+  bool _loading = false;
+  bool _testing = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _mode = widget.settings.printerMode == 'thermal' ? 'thermal' : 'pdf';
+    _selected = widget.settings.selectedPrinterName;
+    _refreshPrinters();
+  }
+
+  Future<void> _refreshPrinters() async {
+    setState(() { _loading = true; _error = null; });
+    try {
+      final printers = await Printing.listPrinters();
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _printers = printers;
+        if (_selected.isEmpty && printers.isNotEmpty) {
+          _selected = printers.firstWhere((p) => p.isDefault, orElse: () => printers.first).name;
+        } else if (printers.isNotEmpty && printers.every((p) => p.name != _selected)) {
+          _selected = '';
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _loading = false; _error = 'Could not list printers: $e'; });
+    }
+  }
+
+  bool get _selectedAvailable {
+    if (_selected.isEmpty) return false;
+    for (final p in _printers) {
+      if (p.name == _selected) return p.isAvailable;
+    }
+    return false;
+  }
+
+  Future<void> _save() async {
+    await ref.read(settingsProvider.notifier).save(widget.settings.copyWith(
+      printerMode: _mode,
+      selectedPrinterName: _selected,
+    ));
+    if (mounted) showSuccess(context, 'Printer settings saved');
+  }
+
+  Future<void> _testPrint() async {
+    setState(() => _testing = true);
+    try {
+      await PrintService.instance.testPrint();
+      if (mounted) showSuccess(context, _mode == 'thermal' ? 'Test page sent to printer' : 'Test PDF generated');
+    } catch (e) {
+      if (mounted) showError(context, e is PrintException ? e.message : 'Test print failed: $e');
+    } finally {
+      if (mounted) setState(() => _testing = false);
+    }
+  }
+
+  Widget _modeCard(String mode, IconData icon, String title, String subtitle) {
+    final sel = _mode == mode;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _mode = mode),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: sel ? context.cs.primary.withAlpha(18) : context.cs.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: sel ? context.cs.primary : context.border, width: sel ? 1.6 : 1),
+          ),
+          child: Row(children: [
+            Icon(icon, color: sel ? context.cs.primary : context.cs.onSurfaceVariant),
+            const SizedBox(width: 10),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+              const SizedBox(height: 2),
+              Text(subtitle, style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+            ])),
+            if (sel) Icon(Icons.check_circle, color: context.cs.primary, size: 18),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => SingleChildScrollView(
+    padding: const EdgeInsets.all(24),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('Printer Settings', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8),
+      Text('Choose how bills and receipts are generated', style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 13)),
+      const SizedBox(height: 24),
+      AppCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Print mode', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+        const SizedBox(height: 12),
+        Row(children: [
+          _modeCard('pdf', Icons.picture_as_pdf_outlined, 'PDF', 'Save an 80mm PDF, no printer dialog'),
+          const SizedBox(width: 12),
+          _modeCard('thermal', Icons.print_outlined, 'Thermal Printer', 'Direct print to your thermal printer'),
+        ]),
+        const Divider(height: 28),
+        if (_mode == 'thermal') ..._thermalSection() else ..._pdfSection(),
+        const SizedBox(height: 20),
+        FilledButton.icon(
+          icon: const Icon(Icons.save_rounded, size: 16),
+          label: const Text('Save settings'),
+          onPressed: _save,
+        ),
+      ])),
+    ]),
+  );
+
+  List<Widget> _pdfSection() => [
+    Text('In PDF mode every bill and receipt is generated as an 80mm PDF.',
+        style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 13)),
+    const SizedBox(height: 6),
+    Text('A save dialog lets you choose where to store the file — no printer dialog is shown.',
+        style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 13)),
+    const SizedBox(height: 14),
+    OutlinedButton.icon(
+      icon: _testing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.print_rounded, size: 16),
+      label: const Text('Generate test PDF'),
+      onPressed: _testing ? null : _testPrint,
+    ),
+  ];
+
+  List<Widget> _thermalSection() => [
+    if (_error != null)
+      Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+      ),
+    Row(children: [
+      const Text('Thermal printer:', style: TextStyle(fontWeight: FontWeight.w600)),
+      const SizedBox(width: 16),
+      Expanded(
+        child: DropdownButtonFormField<String>(
+          value: _selected.isEmpty ? null : _selected,
+          hint: const Text('Select printer'),
+          isExpanded: true,
+          items: _printers.map((p) => DropdownMenuItem(
+            value: p.name,
+            child: Text('${p.name}${p.isDefault ? ' (default)' : ''}',
+                overflow: TextOverflow.ellipsis),
+          )).toList(),
+          onChanged: (v) => setState(() => _selected = v ?? ''),
+        ),
+      ),
+      const SizedBox(width: 8),
+      IconButton(
+        tooltip: 'Refresh printer list',
+        onPressed: _loading ? null : _refreshPrinters,
+        icon: _loading
+            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+            : const Icon(Icons.refresh_rounded),
+      ),
+    ]),
+    const SizedBox(height: 10),
+    Row(children: [
+      Icon(Icons.circle, size: 10,
+          color: _selected.isEmpty || !_selectedAvailable ? Colors.red : Colors.green),
+      const SizedBox(width: 8),
+      Expanded(child: Text(
+        _selected.isEmpty
+            ? 'Not connected — no printer selected'
+            : _selectedAvailable
+                ? 'Connected: $_selected'
+                : 'Offline / not available: $_selected',
+        style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 13),
+      )),
+    ]),
+    const SizedBox(height: 14),
+    OutlinedButton.icon(
+      icon: _testing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.print_rounded, size: 16),
+      label: const Text('Send test print'),
+      onPressed: (_testing || _selected.isEmpty) ? null : _testPrint,
+    ),
+  ];
 }
 
 class _ThemeSettings extends ConsumerWidget {

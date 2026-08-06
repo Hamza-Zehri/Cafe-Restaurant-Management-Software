@@ -77,6 +77,7 @@ class RestaurantPOSApp extends ConsumerWidget {
 
     // Configure print service when settings change
     ref.listen(settingsProvider, (_, s) => PrintService.instance.configure(s));
+    ref.listen(dbProvider, (_, db) => PrintService.instance.setDatabase(db));
 
     final router = GoRouter(
       initialLocation: '/splash',
