@@ -8,6 +8,12 @@ class BackupService {
   static const String _autoBackupPrefix = 'restaurant_pos_auto_backup_';
 
   /// Packages the database file and the local media folder into a single ZIP archive.
+  ///
+  /// NOTE: License/activation data (stored under the application support
+  /// "sysdata" folder) is intentionally NEVER included. A backup therefore only
+  /// carries business data (database + images). When it is restored on another
+  /// machine, that machine is still bound to its own device ID and must be
+  /// activated separately.
   static Future<void> createBackup(String destZipPath) async {
     final encoder = ZipFileEncoder();
     encoder.create(destZipPath);

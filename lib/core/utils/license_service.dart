@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
@@ -16,7 +15,8 @@ class LicenseService {
   static const _licenseFileName = 'license.dat';
   static const _trialFileName = 'trial.dat';
   static const _trialDays = 7;
-  static const _base32Alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  // Secret shared with the key generators (tools/keygen.dart). Keep in sync!
+  static const _activationSecret = 'rp2::hamza::cafe-pos::hmac-v1';
   static const _saltParts = ['rp', 'os', '-v2', ':', 'hamza', ':', 'license'];
   static String? _licenseDir;
 
@@ -29,34 +29,29 @@ class LicenseService {
 
   static Future<void> _hidePath(String path) async {
     if (!Platform.isWindows) return;
-    try { await Process.run('attrib', ['+h', path]); } catch (_) {}
+    try {
+      await Process.run('attrib', ['+h', path]).timeout(const Duration(seconds: 3));
+    } catch (_) {}
   }
-
-  // Replace this generated development public key with your production public key
-  // from `dart run tools/generate_keypair.dart` before shipping customer builds.
-  static final BigInt _publicModulus = BigInt.parse(
-    '18312461388406904034054358789206088085267195463515078393180730391506675075672945613359307431086630752687476936798697616725977778464939130198127261074540138210247132567195247815956882972353628096967910372555117842053595185311791525609587923967117443979539848185075656509444244715718352227626981636836673447277288575779125565064948612199285885839230628388530758426046829835224784504838757926846903011385362401339178472808491549916700031517068059324528222893792792617580288289637288788102667960105074116702071851677963829872146235232448431704154652260705173353514996691830416660081198848131677568297275219427532387976513',
-  );
-  static final BigInt _publicExponent = BigInt.from(65537);
 
   static String get _licensePath => p.join(_licenseDir!, _licenseFileName);
   static String get _salt => _saltParts.join();
 
   static Future<String> getMachineId() async {
+    // IMPORTANT: only stable hardware / OS-install identifiers are used.
+    // Hostname, COMPUTERNAME, USERNAME and attached-disk serials are excluded
+    // because they change when the PC is renamed, a different user logs in, or
+    // a USB drive is plugged in — which previously invalidated activations.
     final parts = <String>[
       await _run('wmic', ['csproduct', 'get', 'UUID']),
       await _run('wmic', ['bios', 'get', 'serialnumber']),
       await _run('wmic', ['cpu', 'get', 'ProcessorId']),
-      await _run('wmic', ['diskdrive', 'get', 'serialnumber']),
       await _run('reg', [
         'query',
         r'HKLM\SOFTWARE\Microsoft\Cryptography',
         '/v',
         'MachineGuid',
       ]),
-      Platform.localHostname,
-      Platform.environment['COMPUTERNAME'] ?? '',
-      Platform.environment['USERNAME'] ?? '',
     ];
 
     final normalized = parts
@@ -146,20 +141,29 @@ class LicenseService {
 
   static String get _trialPath => p.join(_licenseDir!, _trialFileName);
 
+  /// Generates a compact 16-character activation key in the format
+  /// `XXXX-XXXX-XXXX-XXXX` (HMAC-SHA256 of the machine ID, first 8 bytes in hex).
+  static String generateActivationKey(String machineId) {
+    final digest = Hmac(sha256, utf8.encode(_activationSecret))
+        .convert(utf8.encode(machineId.trim().toUpperCase()))
+        .bytes;
+    final hex = digest
+        .take(8)
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join()
+        .toUpperCase();
+    return '${hex.substring(0, 4)}-${hex.substring(4, 8)}-'
+        '${hex.substring(8, 12)}-${hex.substring(12, 16)}';
+  }
+
   static bool verifyActivationKey(String machineId, String activationKey) {
-    try {
-      final signature = _decodeBase32(activationKey);
-      final signer = Signer('SHA-256/RSA')
-        ..init(false, PublicKeyParameter<RSAPublicKey>(
-          RSAPublicKey(_publicModulus, _publicExponent),
-        ));
-      return signer.verifySignature(
-        Uint8List.fromList(utf8.encode(machineId)),
-        RSASignature(signature),
-      );
-    } catch (_) {
-      return false;
-    }
+    final normalized = activationKey
+        .replaceAll(RegExp(r'[^A-F0-9]', caseSensitive: false), '')
+        .toUpperCase();
+    return _constantTimeEquals(
+      generateActivationKey(machineId).replaceAll('-', ''),
+      normalized,
+    );
   }
 
   static Future<bool> activate(String activationKey) async {
@@ -228,51 +232,6 @@ class LicenseService {
       diff |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
     }
     return diff == 0;
-  }
-
-  static String encodeActivationKey(Uint8List bytes) {
-    final raw = _encodeBase32(bytes);
-    final chunks = <String>[];
-    for (var i = 0; i < raw.length; i += 5) {
-      chunks.add(raw.substring(i, min(i + 5, raw.length)));
-    }
-    return chunks.join('-');
-  }
-
-  static String _encodeBase32(Uint8List bytes) {
-    final out = StringBuffer();
-    var buffer = 0;
-    var bitsLeft = 0;
-    for (final byte in bytes) {
-      buffer = (buffer << 8) | byte;
-      bitsLeft += 8;
-      while (bitsLeft >= 5) {
-        out.write(_base32Alphabet[(buffer >> (bitsLeft - 5)) & 31]);
-        bitsLeft -= 5;
-      }
-    }
-    if (bitsLeft > 0) {
-      out.write(_base32Alphabet[(buffer << (5 - bitsLeft)) & 31]);
-    }
-    return out.toString();
-  }
-
-  static Uint8List _decodeBase32(String input) {
-    final clean = input.replaceAll(RegExp(r'[^A-Z2-7]', caseSensitive: false), '').toUpperCase();
-    final out = <int>[];
-    var buffer = 0;
-    var bitsLeft = 0;
-    for (final code in clean.codeUnits) {
-      final value = _base32Alphabet.indexOf(String.fromCharCode(code));
-      if (value < 0) continue;
-      buffer = (buffer << 5) | value;
-      bitsLeft += 5;
-      if (bitsLeft >= 8) {
-        out.add((buffer >> (bitsLeft - 8)) & 0xFF);
-        bitsLeft -= 8;
-      }
-    }
-    return Uint8List.fromList(out);
   }
 
   static Future<String> _run(String executable, List<String> args) async {

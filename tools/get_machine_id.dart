@@ -1,19 +1,16 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 
 void main() async {
+  // Matches LicenseService.getMachineId: only stable hardware / OS-install
+  // identifiers (no hostname, no username, no attached-disk serials).
   final parts = <String>[
     await _run('wmic', ['csproduct', 'get', 'UUID']),
     await _run('wmic', ['bios', 'get', 'serialnumber']),
     await _run('wmic', ['cpu', 'get', 'ProcessorId']),
-    await _run('wmic', ['diskdrive', 'get', 'serialnumber']),
     await _run('reg', ['query', r'HKLM\SOFTWARE\Microsoft\Cryptography', '/v', 'MachineGuid']),
-    Platform.localHostname,
-    Platform.environment['COMPUTERNAME'] ?? '',
-    Platform.environment['USERNAME'] ?? '',
   ];
 
   final normalized = parts

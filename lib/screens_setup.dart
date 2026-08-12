@@ -655,25 +655,34 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
       _error = null;
     });
 
-    final ok = await LicenseService.activate(_keyCtrl.text.trim());
-    if (!mounted) return;
+    try {
+      final ok = await LicenseService.activate(_keyCtrl.text.trim());
+      if (!mounted) return;
 
-    if (!ok) {
+      if (!ok) {
+        setState(() {
+          _activating = false;
+          _error = 'Invalid activation key for this machine.';
+        });
+        return;
+      }
+
+      final initState = ref.read(initProvider);
+      if (initState.isLoading) {
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+      if (!mounted) return;
+
+      final updatedInitState = ref.read(initProvider);
+      setState(() => _activating = false);
+      context.go(updatedInitState.hasAdmin ? '/login' : '/setup');
+    } catch (e) {
+      if (!mounted) return;
       setState(() {
         _activating = false;
-        _error = 'Invalid activation key for this machine.';
+        _error = 'Activation error: $e';
       });
-      return;
     }
-
-    final initState = ref.read(initProvider);
-    if (initState.isLoading) {
-      await Future.delayed(const Duration(milliseconds: 500));
-    }
-    if (!mounted) return;
-
-    final updatedInitState = ref.read(initProvider);
-    context.go(updatedInitState.hasAdmin ? '/login' : '/setup');
   }
 
   Future<void> _startTrial() async {
