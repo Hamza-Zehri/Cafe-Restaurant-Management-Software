@@ -650,6 +650,13 @@ class $FloorsTable extends Floors with TableInfo<$FloorsTable, Floor> {
   late final GeneratedColumn<String> name = GeneratedColumn<String>(
       'name', aliasedName, false,
       type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _prefixMeta = const VerificationMeta('prefix');
+  @override
+  late final GeneratedColumn<String> prefix = GeneratedColumn<String>(
+      'prefix', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant('T'));
   static const VerificationMeta _sortOrderMeta =
       const VerificationMeta('sortOrder');
   @override
@@ -659,7 +666,7 @@ class $FloorsTable extends Floors with TableInfo<$FloorsTable, Floor> {
       requiredDuringInsert: false,
       defaultValue: const Constant(0));
   @override
-  List<GeneratedColumn> get $columns => [id, name, sortOrder];
+  List<GeneratedColumn> get $columns => [id, name, prefix, sortOrder];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -679,6 +686,10 @@ class $FloorsTable extends Floors with TableInfo<$FloorsTable, Floor> {
     } else if (isInserting) {
       context.missing(_nameMeta);
     }
+    if (data.containsKey('prefix')) {
+      context.handle(_prefixMeta,
+          prefix.isAcceptableOrUnknown(data['prefix']!, _prefixMeta));
+    }
     if (data.containsKey('sort_order')) {
       context.handle(_sortOrderMeta,
           sortOrder.isAcceptableOrUnknown(data['sort_order']!, _sortOrderMeta));
@@ -696,6 +707,8 @@ class $FloorsTable extends Floors with TableInfo<$FloorsTable, Floor> {
           .read(DriftSqlType.int, data['${effectivePrefix}id'])!,
       name: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}name'])!,
+      prefix: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}prefix'])!,
       sortOrder: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}sort_order'])!,
     );
@@ -710,13 +723,19 @@ class $FloorsTable extends Floors with TableInfo<$FloorsTable, Floor> {
 class Floor extends DataClass implements Insertable<Floor> {
   final int id;
   final String name;
+  final String prefix;
   final int sortOrder;
-  const Floor({required this.id, required this.name, required this.sortOrder});
+  const Floor(
+      {required this.id,
+      required this.name,
+      required this.prefix,
+      required this.sortOrder});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<int>(id);
     map['name'] = Variable<String>(name);
+    map['prefix'] = Variable<String>(prefix);
     map['sort_order'] = Variable<int>(sortOrder);
     return map;
   }
@@ -725,6 +744,7 @@ class Floor extends DataClass implements Insertable<Floor> {
     return FloorsCompanion(
       id: Value(id),
       name: Value(name),
+      prefix: Value(prefix),
       sortOrder: Value(sortOrder),
     );
   }
@@ -735,6 +755,7 @@ class Floor extends DataClass implements Insertable<Floor> {
     return Floor(
       id: serializer.fromJson<int>(json['id']),
       name: serializer.fromJson<String>(json['name']),
+      prefix: serializer.fromJson<String>(json['prefix']),
       sortOrder: serializer.fromJson<int>(json['sortOrder']),
     );
   }
@@ -744,19 +765,23 @@ class Floor extends DataClass implements Insertable<Floor> {
     return <String, dynamic>{
       'id': serializer.toJson<int>(id),
       'name': serializer.toJson<String>(name),
+      'prefix': serializer.toJson<String>(prefix),
       'sortOrder': serializer.toJson<int>(sortOrder),
     };
   }
 
-  Floor copyWith({int? id, String? name, int? sortOrder}) => Floor(
+  Floor copyWith({int? id, String? name, String? prefix, int? sortOrder}) =>
+      Floor(
         id: id ?? this.id,
         name: name ?? this.name,
+        prefix: prefix ?? this.prefix,
         sortOrder: sortOrder ?? this.sortOrder,
       );
   Floor copyWithCompanion(FloorsCompanion data) {
     return Floor(
       id: data.id.present ? data.id.value : this.id,
       name: data.name.present ? data.name.value : this.name,
+      prefix: data.prefix.present ? data.prefix.value : this.prefix,
       sortOrder: data.sortOrder.present ? data.sortOrder.value : this.sortOrder,
     );
   }
@@ -766,53 +791,64 @@ class Floor extends DataClass implements Insertable<Floor> {
     return (StringBuffer('Floor(')
           ..write('id: $id, ')
           ..write('name: $name, ')
+          ..write('prefix: $prefix, ')
           ..write('sortOrder: $sortOrder')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, name, sortOrder);
+  int get hashCode => Object.hash(id, name, prefix, sortOrder);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is Floor &&
           other.id == this.id &&
           other.name == this.name &&
+          other.prefix == this.prefix &&
           other.sortOrder == this.sortOrder);
 }
 
 class FloorsCompanion extends UpdateCompanion<Floor> {
   final Value<int> id;
   final Value<String> name;
+  final Value<String> prefix;
   final Value<int> sortOrder;
   const FloorsCompanion({
     this.id = const Value.absent(),
     this.name = const Value.absent(),
+    this.prefix = const Value.absent(),
     this.sortOrder = const Value.absent(),
   });
   FloorsCompanion.insert({
     this.id = const Value.absent(),
     required String name,
+    this.prefix = const Value.absent(),
     this.sortOrder = const Value.absent(),
   }) : name = Value(name);
   static Insertable<Floor> custom({
     Expression<int>? id,
     Expression<String>? name,
+    Expression<String>? prefix,
     Expression<int>? sortOrder,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (name != null) 'name': name,
+      if (prefix != null) 'prefix': prefix,
       if (sortOrder != null) 'sort_order': sortOrder,
     });
   }
 
   FloorsCompanion copyWith(
-      {Value<int>? id, Value<String>? name, Value<int>? sortOrder}) {
+      {Value<int>? id,
+      Value<String>? name,
+      Value<String>? prefix,
+      Value<int>? sortOrder}) {
     return FloorsCompanion(
       id: id ?? this.id,
       name: name ?? this.name,
+      prefix: prefix ?? this.prefix,
       sortOrder: sortOrder ?? this.sortOrder,
     );
   }
@@ -826,6 +862,9 @@ class FloorsCompanion extends UpdateCompanion<Floor> {
     if (name.present) {
       map['name'] = Variable<String>(name.value);
     }
+    if (prefix.present) {
+      map['prefix'] = Variable<String>(prefix.value);
+    }
     if (sortOrder.present) {
       map['sort_order'] = Variable<int>(sortOrder.value);
     }
@@ -837,6 +876,7 @@ class FloorsCompanion extends UpdateCompanion<Floor> {
     return (StringBuffer('FloorsCompanion(')
           ..write('id: $id, ')
           ..write('name: $name, ')
+          ..write('prefix: $prefix, ')
           ..write('sortOrder: $sortOrder')
           ..write(')'))
         .toString();
@@ -9977,11 +10017,13 @@ typedef $$UsersTableProcessedTableManager = ProcessedTableManager<
 typedef $$FloorsTableCreateCompanionBuilder = FloorsCompanion Function({
   Value<int> id,
   required String name,
+  Value<String> prefix,
   Value<int> sortOrder,
 });
 typedef $$FloorsTableUpdateCompanionBuilder = FloorsCompanion Function({
   Value<int> id,
   Value<String> name,
+  Value<String> prefix,
   Value<int> sortOrder,
 });
 
@@ -10021,6 +10063,9 @@ class $$FloorsTableFilterComposer
 
   ColumnFilters<String> get name => $composableBuilder(
       column: $table.name, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get prefix => $composableBuilder(
+      column: $table.prefix, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<int> get sortOrder => $composableBuilder(
       column: $table.sortOrder, builder: (column) => ColumnFilters(column));
@@ -10062,6 +10107,9 @@ class $$FloorsTableOrderingComposer
   ColumnOrderings<String> get name => $composableBuilder(
       column: $table.name, builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<String> get prefix => $composableBuilder(
+      column: $table.prefix, builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<int> get sortOrder => $composableBuilder(
       column: $table.sortOrder, builder: (column) => ColumnOrderings(column));
 }
@@ -10080,6 +10128,9 @@ class $$FloorsTableAnnotationComposer
 
   GeneratedColumn<String> get name =>
       $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get prefix =>
+      $composableBuilder(column: $table.prefix, builder: (column) => column);
 
   GeneratedColumn<int> get sortOrder =>
       $composableBuilder(column: $table.sortOrder, builder: (column) => column);
@@ -10131,21 +10182,25 @@ class $$FloorsTableTableManager extends RootTableManager<
           updateCompanionCallback: ({
             Value<int> id = const Value.absent(),
             Value<String> name = const Value.absent(),
+            Value<String> prefix = const Value.absent(),
             Value<int> sortOrder = const Value.absent(),
           }) =>
               FloorsCompanion(
             id: id,
             name: name,
+            prefix: prefix,
             sortOrder: sortOrder,
           ),
           createCompanionCallback: ({
             Value<int> id = const Value.absent(),
             required String name,
+            Value<String> prefix = const Value.absent(),
             Value<int> sortOrder = const Value.absent(),
           }) =>
               FloorsCompanion.insert(
             id: id,
             name: name,
+            prefix: prefix,
             sortOrder: sortOrder,
           ),
           withReferenceMapper: (p0) => p0

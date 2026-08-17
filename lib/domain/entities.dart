@@ -87,9 +87,10 @@ class SalaryRecord {
 enum TableStatus { available, occupied, reserved, cleaning }
 
 class FloorEntity {
-  const FloorEntity({required this.id, required this.name, required this.sortOrder});
+  const FloorEntity({required this.id, required this.name, this.prefix = 'T', required this.sortOrder});
   final int id;
   final String name;
+  final String prefix;
   final int sortOrder;
 }
 

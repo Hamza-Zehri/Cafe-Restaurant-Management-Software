@@ -255,7 +255,7 @@ final floorTablesProvider = StreamProvider.family<List<TableEntity>, int>((ref, 
 
 final floorsProvider = FutureProvider<List<FloorEntity>>((ref) async {
   final rows = await ref.watch(dbProvider).tableDao.allFloors();
-  return rows.map((r) => FloorEntity(id: r.id, name: r.name, sortOrder: r.sortOrder)).toList();
+  return rows.map((r) => FloorEntity(id: r.id, name: r.name, prefix: r.prefix, sortOrder: r.sortOrder)).toList();
 });
 
 TableEntity _mapTable(RestaurantTableRow r) => TableEntity(

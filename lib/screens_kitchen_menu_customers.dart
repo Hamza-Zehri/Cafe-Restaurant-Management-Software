@@ -159,7 +159,7 @@ class _KitchenClockState extends State<_KitchenClock> {
 
   @override
   Widget build(BuildContext context) => Text(
-        DateFormat('HH:mm:ss').format(DateTime.now()),
+        DateFormat('h:mm:ss a').format(DateTime.now()),
         style: const TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 18,
@@ -1718,7 +1718,7 @@ class _CustomerDetail extends ConsumerWidget {
                             style: const TextStyle(
                                 fontWeight: FontWeight.w500, fontSize: 13)),
                         Text(
-                            DateFormat('dd MMM yyyy  HH:mm')
+                            DateFormat('dd MMM yyyy  h:mm a')
                                 .format(l.createdAt),
                             style: TextStyle(
                                 fontSize: 11, color: cs.onSurfaceVariant)),

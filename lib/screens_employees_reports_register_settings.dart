@@ -344,7 +344,7 @@ class _AttendanceTab extends ConsumerWidget {
                     const SizedBox(width: 14),
                     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text(r.userName, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                      Text('In: ${DateFormat('HH:mm').format(r.checkIn)}${r.checkOut != null ? '  Out: ${DateFormat('HH:mm').format(r.checkOut!)}' : '  — working'}',
+                      Text('In: ${DateFormat('h:mm a').format(r.checkIn)}${r.checkOut != null ? '  Out: ${DateFormat('h:mm a').format(r.checkOut!)}' : '  — working'}',
                         style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant)),
                     ])),
                     Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
@@ -692,27 +692,32 @@ class _SalesSummaryTab extends ConsumerWidget {
                 child: Text('No invoices in this period', style: TextStyle(color: context.cs.onSurfaceVariant)),
               ))
             else
-              ...invoices.take(50).map((inv) => Container(
-                margin: const EdgeInsets.only(bottom: 6),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(color: context.cardBg, borderRadius: BorderRadius.circular(10), border: Border.all(color: context.border, width: 0.5)),
-                child: Row(children: [
-                  Text(inv.invoiceNumber, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                  const SizedBox(width: 12),
-                  Text(inv.tableNameCol, style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 12)),
-                  const SizedBox(width: 8),
-                  Text(inv.waiterName, style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 12)),
-                  const Spacer(),
-                  Text(DateFormat('dd/MM HH:mm').format(inv.createdAt), style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
-                  const SizedBox(width: 14),
-                  Text('$sym ${inv.grandTotal.toStringAsFixed(0)}', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: context.cs.primary)),
-                  const SizedBox(width: 10),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                    decoration: BoxDecoration(color: Colors.green.withAlpha(20), borderRadius: BorderRadius.circular(5)),
-                    child: Text(inv.paymentMethod.toUpperCase(), style: const TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.w700)),
-                  ),
-                ]),
+              ...invoices.take(50).map((inv) => GestureDetector(
+                onTap: () => _showInvoiceDetail(ref, context, inv, sym),
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(color: context.cardBg, borderRadius: BorderRadius.circular(10), border: Border.all(color: context.border, width: 0.5)),
+                  child: Row(children: [
+                    Text(inv.invoiceNumber, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                    const SizedBox(width: 12),
+                    Text(inv.tableNameCol, style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 12)),
+                    const SizedBox(width: 8),
+                    Text(inv.waiterName, style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 12)),
+                    const Spacer(),
+                    Text(DateFormat('dd/MM h:mm a').format(inv.createdAt), style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+                    const SizedBox(width: 14),
+                    Text('$sym ${inv.grandTotal.toStringAsFixed(0)}', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: context.cs.primary)),
+                    const SizedBox(width: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(color: Colors.green.withAlpha(20), borderRadius: BorderRadius.circular(5)),
+                      child: Text(inv.paymentMethod.toUpperCase(), style: const TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.w700)),
+                    ),
+                    const SizedBox(width: 8),
+                    Icon(Icons.chevron_right, size: 18, color: context.cs.onSurfaceVariant),
+                  ]),
+                ),
               )),
           ]),
         );
@@ -723,6 +728,157 @@ class _SalesSummaryTab extends ConsumerWidget {
   BarChartGroupData _bar(int x, double y, Color color) => BarChartGroupData(x: x, barRods: [
     BarChartRodData(toY: y, color: color, width: 36, borderRadius: const BorderRadius.vertical(top: Radius.circular(5))),
   ]);
+
+  Future<InvoiceEntity> _buildInvoiceEntity(WidgetRef ref, InvoiceRow inv) async {
+    final db = ref.read(dbProvider);
+    final itemRows = await db.orderDao.itemsForOrder(inv.orderId);
+    final items = itemRows.map((i) {
+      List<OrderModifier> mods = [];
+      try {
+        final decoded = jsonDecode(i.modifiersJson) as List;
+        mods = decoded.map((m) => OrderModifier(name: m['name'], price: (m['price'] as num).toDouble())).toList();
+      } catch (_) {}
+      return OrderItemEntity(
+        id: i.id, orderId: i.orderId,
+        menuItem: MenuItemEntity(id: i.menuItemId, groupId: 0, groupName: '', name: i.menuItemName, price: i.unitPrice),
+        quantity: i.quantity, unitPrice: i.unitPrice, notes: i.notes,
+        status: OrderItemStatus.values.firstWhere((s) => s.name == i.status, orElse: () => OrderItemStatus.pending),
+        modifiers: mods, isVoided: i.isVoided, sentToKitchenAt: i.sentToKitchenAt,
+        dealId: i.dealId, dealItemsJson: i.dealItemsJson,
+      );
+    }).toList();
+    List<PaymentSplit> splits = [];
+    try {
+      final d = jsonDecode(inv.paymentSplitsJson) as List;
+      splits = d.map((s) => PaymentSplit(
+        method: PaymentMethod.values.firstWhere((m) => m.name == s['method'], orElse: () => PaymentMethod.cash),
+        amount: (s['amount'] as num).toDouble(),
+      )).toList();
+    } catch (_) {}
+    return InvoiceEntity(
+      id: inv.id, invoiceNumber: inv.invoiceNumber, orderId: inv.orderId,
+      orderNumber: inv.orderNumber, tableName: inv.tableNameCol, waiterName: inv.waiterName,
+      items: items, subtotal: inv.subtotal, discountValue: inv.discountValue,
+      taxValue: inv.taxValue, serviceChargeValue: inv.serviceChargeValue,
+      grandTotal: inv.grandTotal, amountPaid: inv.amountPaid, changeAmount: inv.changeAmount,
+      paymentMethod: PaymentMethod.values.firstWhere((m) => m.name == inv.paymentMethod, orElse: () => PaymentMethod.cash),
+      status: BillStatus.final_, createdAt: inv.createdAt, paymentSplits: splits,
+    );
+  }
+
+  void _showInvoiceDetail(WidgetRef ref, BuildContext ctx, InvoiceRow inv, String sym) {
+    showDialog(context: ctx, builder: (dialogCtx) {
+      final width = MediaQuery.of(dialogCtx).size.width * 0.42;
+      return Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: width.clamp(380, 560)),
+          child: FutureBuilder<InvoiceEntity>(
+            future: _buildInvoiceEntity(ref, inv),
+            builder: (_, snap) {
+              if (!snap.hasData) {
+                return const SizedBox(height: 200, child: Center(child: CircularProgressIndicator()));
+              }
+              final entity = snap.data!;
+              final sym_ = sym;
+              return Column(mainAxisSize: MainAxisSize.min, children: [
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: dialogCtx.cs.primary.withAlpha(15),
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                  ),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Text(entity.invoiceNumber, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: dialogCtx.cs.primary)),
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(color: Colors.green.withAlpha(20), borderRadius: BorderRadius.circular(5)),
+                        child: Text(entity.paymentMethod.name.toUpperCase(), style: const TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.w700)),
+                      ),
+                    ]),
+                    const SizedBox(height: 4),
+                    Text('Table: ${entity.tableName}  |  Waiter: ${entity.waiterName}', style: TextStyle(fontSize: 12, color: dialogCtx.cs.onSurfaceVariant)),
+                    Text(DateFormat('dd MMM yyyy, h:mm a').format(entity.createdAt), style: TextStyle(fontSize: 11, color: dialogCtx.cs.onSurfaceVariant)),
+                  ]),
+                ),
+                Flexible(child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('ITEMS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: dialogCtx.cs.onSurfaceVariant, letterSpacing: 0.6)),
+                    const SizedBox(height: 6),
+                    ...entity.items.where((i) => !i.isVoided).map((item) => Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(children: [
+                        Text('${item.quantity}x', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(item.menuItem.name, style: const TextStyle(fontSize: 13))),
+                        Text('$sym_ ${item.lineTotal.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                      ]),
+                    )),
+                    if (entity.items.any((i) => i.isVoided)) ...[
+                      const SizedBox(height: 4),
+                      Text('Voided: ${entity.items.where((i) => i.isVoided).length} item(s)', style: TextStyle(fontSize: 11, color: Colors.red.shade400)),
+                    ],
+                  ]),
+                )),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(border: Border(top: BorderSide(color: dialogCtx.border, width: 0.5))),
+                  child: Column(children: [
+                    _detailRow('Subtotal', '$sym_ ${entity.subtotal.toStringAsFixed(0)}'),
+                    if (entity.discountValue > 0) _detailRow('Discount', '-$sym_ ${entity.discountValue.toStringAsFixed(0)}'),
+                    if (entity.taxValue > 0) _detailRow('Tax', '$sym_ ${entity.taxValue.toStringAsFixed(0)}'),
+                    if (entity.serviceChargeValue > 0) _detailRow('Service', '$sym_ ${entity.serviceChargeValue.toStringAsFixed(0)}'),
+                    Divider(color: dialogCtx.border),
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                      const Text('TOTAL', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                      Text('$sym_ ${entity.grandTotal.toStringAsFixed(0)}', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: dialogCtx.cs.primary)),
+                    ]),
+                    const SizedBox(height: 4),
+                    _detailRow('Paid', '$sym_ ${entity.amountPaid.toStringAsFixed(0)}'),
+                    if (entity.changeAmount > 0) _detailRow('Change', '$sym_ ${entity.changeAmount.toStringAsFixed(0)}'),
+                    const SizedBox(height: 12),
+                    Row(children: [
+                      Expanded(child: OutlinedButton.icon(
+                        icon: const Icon(Icons.close, size: 16),
+                        label: const Text('Close'),
+                        onPressed: () => Navigator.pop(dialogCtx),
+                      )),
+                      const SizedBox(width: 10),
+                      Expanded(child: FilledButton.icon(
+                        icon: const Icon(Icons.print_rounded, size: 16),
+                        label: const Text('Print Receipt'),
+                        onPressed: () async {
+                          Navigator.pop(dialogCtx);
+                          try {
+                            await PrintService.instance.printFinalReceipt(entity);
+                          } catch (e) {
+                            showError(ctx, e is PrintException ? e.message : 'Print failed: $e');
+                          }
+                        },
+                      )),
+                    ]),
+                  ]),
+                ),
+              ]);
+            },
+          ),
+        ),
+      );
+    });
+  }
+
+  Widget _detailRow(String label, String value) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 2),
+    child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+      Text(label, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+      Text(value, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+    ]),
+  );
 }
 
 class _ReportKPI extends StatelessWidget {
@@ -1200,7 +1356,7 @@ class _ExpenseRowTile extends StatelessWidget {
         Row(children: [
           Text(expense.category, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
           const SizedBox(width: 8),
-          Text(DateFormat('dd/MM/yyyy HH:mm').format(expense.createdAt), style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+          Text(DateFormat('dd/MM/yyyy h:mm a').format(expense.createdAt), style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
         ]),
         const SizedBox(height: 3),
         Text(expense.description, style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant), maxLines: 2, overflow: TextOverflow.ellipsis),
@@ -1306,11 +1462,17 @@ class _OpenRegisterPanel extends ConsumerWidget {
             child: Row(children: [
               Container(width: 8, height: 8, decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle)),
               const SizedBox(width: 8),
-              Text('Register OPEN since ${DateFormat('HH:mm').format(register.openedAt)}',
+              Text('Register OPEN since ${DateFormat('h:mm a').format(register.openedAt)}',
                 style: const TextStyle(color: Colors.green, fontWeight: FontWeight.w700)),
             ]),
           ),
           const Spacer(),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.receipt_long, size: 16),
+            label: const Text('X Report'),
+            onPressed: () => _showXReportDialog(context, ref, register),
+          ),
+          const SizedBox(width: 8),
           OutlinedButton.icon(
             icon: const Icon(Icons.bar_chart_rounded, size: 16),
             label: const Text('View Reports'),
@@ -1459,6 +1621,52 @@ class _OpenRegisterPanel extends ConsumerWidget {
         ),
       ],
     )));
+  }
+
+  void _showXReportDialog(BuildContext context, WidgetRef ref, CashRegisterEntity register) async {
+    final data = await PrintService.instance.collectShiftData(register.openedAt);
+    final sym = ref.read(settingsProvider).currencySymbol;
+    final now = DateTime.now();
+    if (!context.mounted) return;
+    await showDialog(context: context, builder: (_) => AlertDialog(
+      title: Row(children: [
+        const Icon(Icons.receipt_long, size: 20),
+        const SizedBox(width: 8),
+        const Text('X Report — Shift Summary'),
+      ]),
+      content: SizedBox(width: 420, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _XRow('Date', DateFormat('dd MMM yyyy').format(now)),
+        _XRow('Time', DateFormat('h:mm a').format(now)),
+        const SizedBox(height: 12),
+        Text('ITEMS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.cs.primary, letterSpacing: 0.6)),
+        const SizedBox(height: 6),
+        if (data.itemSales.isEmpty)
+          Text('No items sold yet', style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 13)),
+        if (data.itemSales.isNotEmpty)
+          ...data.itemSales.map((s) => Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('${s.qty}x ${s.name}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              Text('$sym ${s.amount.toStringAsFixed(0)}', style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant)),
+            ]),
+          )),
+      ]))),
+      actions: [
+        TextButton.icon(
+          icon: const Icon(Icons.close, size: 16),
+          label: const Text('Close'),
+          onPressed: () => Navigator.pop(context),
+        ),
+        FilledButton.icon(
+          icon: const Icon(Icons.print_rounded, size: 16),
+          label: const Text('Print Receipt'),
+          onPressed: () async {
+            Navigator.pop(context);
+            await PrintService.instance.printXReport(register);
+          },
+        ),
+      ],
+    ));
   }
 }
 
@@ -1647,7 +1855,6 @@ class _ReceiptTaxSettings extends ConsumerStatefulWidget {
 
 class _ReceiptTaxSettingsState extends ConsumerState<_ReceiptTaxSettings> {
   late TextEditingController _tax, _svc, _sym;
-  late int _width;
   late bool _autoKitchen, _autoPrint;
 
   @override
@@ -1656,7 +1863,6 @@ class _ReceiptTaxSettingsState extends ConsumerState<_ReceiptTaxSettings> {
     _tax  = TextEditingController(text: widget.settings.taxPercent.toStringAsFixed(0));
     _svc  = TextEditingController(text: widget.settings.serviceChargePercent.toStringAsFixed(0));
     _sym  = TextEditingController(text: widget.settings.currencySymbol);
-    _width = widget.settings.receiptWidth;
     _autoKitchen = widget.settings.autoKitchenPrint;
     _autoPrint   = widget.settings.autoPrintBillOnPay;
   }
@@ -1675,23 +1881,13 @@ class _ReceiptTaxSettingsState extends ConsumerState<_ReceiptTaxSettings> {
           const SizedBox(width: 12),
           Expanded(child: TextField(controller: _svc, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Service charge %', suffixText: '%'))),
           const SizedBox(width: 12),
-          Expanded(child: TextField(controller: _sym, decoration: const InputDecoration(labelText: 'Currency symbol (e.g. Rs)'))),
+          Expanded(child: TextField(controller: _sym, decoration: const InputDecoration(labelText: 'Currency symbol (e.g. Rs'))),
         ]),
         const SizedBox(height: 14),
-        // Receipt width
-        Row(children: [
-          const Text('Receipt width:', style: TextStyle(fontWeight: FontWeight.w600)),
-          const SizedBox(width: 16),
-          ...[58, 80].map((w) => Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: GestureDetector(
-              onTap: () => setState(() => _width = w),
-              child: Row(children: [
-                Radio<int>(value: w, groupValue: _width, onChanged: (v) => setState(() => _width = v!)),
-                Text('${w}mm'),
-              ]),
-            ),
-          )),
+        const Row(children: [
+          Text('Receipt width:', style: TextStyle(fontWeight: FontWeight.w600)),
+          SizedBox(width: 16),
+          Text('80mm thermal (fixed)', style: TextStyle(color: Colors.grey)),
         ]),
         const Divider(height: 20),
         SwitchListTile(
@@ -1716,7 +1912,7 @@ class _ReceiptTaxSettingsState extends ConsumerState<_ReceiptTaxSettings> {
             taxPercent: double.tryParse(_tax.text) ?? 17,
             serviceChargePercent: double.tryParse(_svc.text) ?? 10,
             currencySymbol: _sym.text,
-            receiptWidth: _width,
+            receiptWidth: 80,
             autoKitchenPrint: _autoKitchen,
             autoPrintBillOnPay: _autoPrint,
           ));

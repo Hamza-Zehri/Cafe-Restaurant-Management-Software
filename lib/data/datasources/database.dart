@@ -51,6 +51,7 @@ class Users extends Table {
 class Floors extends Table {
   IntColumn get id => integer().autoIncrement()();
   TextColumn get name => text()();
+  TextColumn get prefix => text().withDefault(const Constant('T'))();
   IntColumn get sortOrder => integer().withDefault(const Constant(0))();
 }
 
@@ -536,7 +537,7 @@ class SettingsDao extends DatabaseAccessor<AppDatabase> with _$SettingsDaoMixin 
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _open());
 
-  @override int get schemaVersion => 2;
+  @override int get schemaVersion => 3;
 
   @override MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) async {
@@ -551,6 +552,9 @@ class AppDatabase extends _$AppDatabase {
         await m.addColumn(orderItems, orderItems.dealId);
         await m.addColumn(orderItems, orderItems.dealItemsJson);
       }
+      if (from < 3) {
+        await m.addColumn(floors, floors.prefix);
+      }
     },
   );
 
@@ -558,8 +562,8 @@ class AppDatabase extends _$AppDatabase {
     final now = DateTime.now();
 
     // Seed floors
-    final floorId = await into(floors).insert(FloorsCompanion.insert(name: 'Main Hall', sortOrder: const Value(1)));
-    final floor2 = await into(floors).insert(FloorsCompanion.insert(name: 'Roof Top', sortOrder: const Value(2)));
+    final floorId = await into(floors).insert(FloorsCompanion.insert(name: 'Main Hall', prefix: const Value('T'), sortOrder: const Value(1)));
+    final floor2 = await into(floors).insert(FloorsCompanion.insert(name: 'Roof Top', prefix: const Value('R'), sortOrder: const Value(2)));
 
     // Seed tables (main hall)
     for (int i = 1; i <= 8; i++) {

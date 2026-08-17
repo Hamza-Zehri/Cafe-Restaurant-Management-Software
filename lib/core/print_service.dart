@@ -33,7 +33,8 @@ class ReportItemStat {
   final int orderCount;
   final int qty;
   final int kitchenQty;
-  const ReportItemStat(this.name, this.orderCount, this.qty, this.kitchenQty);
+  final double amount;
+  const ReportItemStat(this.name, this.orderCount, this.qty, this.kitchenQty, [this.amount = 0]);
 
   bool get discrepancy => kitchenQty < qty;
 }
@@ -86,6 +87,7 @@ class PrintService {
   //             with the printer's real geometry so nothing gets clipped.
   //   pdf     → saves the 80mm PDF via a save dialog, no printer dialog.
   Future<void> _emit(String name, Future<Uint8List> Function(PdfPageFormat) build) async {
+    final fixedFormat = _fixedLayout.pageFormat;
     if (printerMode == 'thermal') {
       final printers = await Printing.listPrinters();
       final selected = _settings.selectedPrinterName;
@@ -104,13 +106,12 @@ class PrintService {
       }
       await Printing.directPrintPdf(
         printer: printer,
-        // Sane paper for the printer DC; the real geometry comes from onLayout.
-        format: _layout().pageFormat.copyWith(height: PdfPageFormat.a4.height),
-        onLayout: (format) => build(format),
+        format: fixedFormat.copyWith(height: PdfPageFormat.a4.height),
+        onLayout: (_) => build(fixedFormat),
         name: name,
       );
     } else {
-      final bytes = await build(_layout().pageFormat);
+      final bytes = await build(fixedFormat);
       final path = await FilePicker.platform.saveFile(
         dialogTitle: 'Save $name as PDF',
         fileName: '$name.pdf',
@@ -141,7 +142,7 @@ class PrintService {
         t.dashedLine(),
         t.row('Mode', printerMode.toUpperCase(), size: 9, font: thermalBold),
         t.row('Printer', _settings.selectedPrinterName.isEmpty ? 'Default' : _settings.selectedPrinterName, size: 9, font: thermalRegular),
-        t.row('Width', '${_settings.receiptWidth == 80 ? 80 : 58}mm', size: 9, font: thermalRegular),
+        t.row('Width', '80mm', size: 9, font: thermalRegular),
         t.row('Time', _df.format(DateTime.now()), size: 9, font: thermalRegular),
         t.dashedLine(h: 1.4),
         pw.SizedBox(height: 4),
@@ -151,18 +152,20 @@ class PrintService {
     return pdf.save();
   });
 
-  final _df = DateFormat('dd/MM/yyyy HH:mm');
-  final _tf = DateFormat('HH:mm');
+  final _df = DateFormat('dd/MM/yyyy h:mm a');
+  final _tf = DateFormat('h:mm a');
   final _dtf = DateFormat('dd MMM yyyy');
 
   String _dealSummary(OrderItemEntity item) =>
       item.dealItems.map((d) => '${d.quantity}x ${d.name}').join(', ');
 
   // ── Layout helper ──────────────────────────────────
+  // Always 80mm thermal — identical layout for PDF and thermal print.
+  static final _fixedLayout = ThermalLayout(paperWidthMm: 80, marginMm: 4);
+
   ThermalLayout _layout({PdfPageFormat? format}) {
     if (format != null) return ThermalLayout.fromFormat(format);
-    final is80mm = _settings.receiptWidth == 80;
-    return ThermalLayout(paperWidthMm: is80mm ? 80 : 58, marginMm: is80mm ? 4 : 3);
+    return _fixedLayout;
   }
 
   // ── Fonts ──────────────────────────────────────────
@@ -186,14 +189,16 @@ class PrintService {
     final orders = await db.orderDao.forPeriod(since, now);
 
     final soldQty = <String, int>{};
+    final soldAmount = <String, double>{};
     final soldOrders = <String, Set<int>>{};
     var totalItems = 0;
-    for (final inv in invoices) {
-      final items = await db.orderDao.itemsForOrder(inv.orderId);
+    for (final order in orders) {
+      final items = await db.orderDao.itemsForOrder(order.id);
       for (final it in items) {
         if (it.isVoided) continue;
         soldQty[it.menuItemName] = (soldQty[it.menuItemName] ?? 0) + it.quantity;
-        (soldOrders[it.menuItemName] ??= <int>{}).add(inv.orderId);
+        soldAmount[it.menuItemName] = (soldAmount[it.menuItemName] ?? 0) + (it.unitPrice * it.quantity);
+        (soldOrders[it.menuItemName] ??= <int>{}).add(order.id);
         totalItems += it.quantity;
       }
     }
@@ -222,10 +227,11 @@ class PrintService {
       soldOrders[n]?.length ?? 0,
       soldQty[n] ?? 0,
       kitchenQty[n] ?? 0,
+      soldAmount[n] ?? 0,
     )).toList()..sort((a, b) => b.qty.compareTo(a.qty));
 
     return ReportData(
-      completedOrders: invoices.length,
+      completedOrders: orders.where((o) => o.status == 'paid').length,
       totalItemsSold: totalItems,
       voidedOrders: orders.where((o) => o.status == 'cancelled').length,
       kitchenGenerated: kitchenGenerated,
@@ -275,6 +281,12 @@ class PrintService {
   /// Gathers shift stats (item sales + kitchen counts) so the UI can show
   /// per-item kitchen quantities before printing the Z report.
   Future<ReportData> collectShiftData(DateTime since) => _collectShiftData(since);
+
+  // ── X Report (mid-shift) ──────────────────────────
+  Future<void> printXReport(CashRegisterEntity reg) async {
+    final data = await collectShiftData(reg.openedAt);
+    await _emit('X-Report', (format) => _buildXReportPDF(format, reg, data));
+  }
 
   // ── Internal: Kitchen PDF ─────────────────────────
   Future<Uint8List> _buildKitchenPDF(PdfPageFormat format, OrderEntity order, List<OrderItemEntity> items, {int? ticketNumber}) async {
@@ -354,9 +366,9 @@ class PrintService {
           t.dashedLine(),
           pw.SizedBox(height: 3),
           t.row('Date', _df.format(DateTime.now()), size: 8.5, font: thermalRegular),
-          t.row('Table', order.tableName, size: 8.5, font: thermalRegular),
+          t.row('Table', order.tableName, size: 8.5, font: thermalBold),
           t.row('Order #', order.orderNumber, size: 8.5, font: thermalRegular),
-          t.row('Waiter', order.waiterName, size: 8.5, font: thermalRegular),
+          t.row('Waiter', order.waiterName, size: 8.5, font: thermalBold),
           pw.SizedBox(height: 3),
           t.dashedLine(),
           pw.SizedBox(height: 3),
@@ -435,9 +447,9 @@ class PrintService {
           pw.SizedBox(height: 3),
           t.row('Invoice', inv.invoiceNumber, size: 8.5, font: thermalRegular),
           t.row('Date', _df.format(inv.createdAt), size: 8.5, font: thermalRegular),
-          t.row('Table', inv.tableName, size: 8.5, font: thermalRegular),
+          t.row('Table', inv.tableName, size: 8.5, font: thermalBold),
           t.row('Order #', inv.orderNumber, size: 8.5, font: thermalRegular),
-          t.row('Waiter', inv.waiterName, size: 8.5, font: thermalRegular),
+          t.row('Waiter', inv.waiterName, size: 8.5, font: thermalBold),
           pw.SizedBox(height: 3),
           t.dashedLine(),
           pw.SizedBox(height: 3),
@@ -667,6 +679,43 @@ class PrintService {
         t.dashedLine(h: 1.2),
         pw.SizedBox(height: 4),
         t.center('*** END OF DAY — COUNTERS RESET ***', font: thermalBold, size: 9),
+        t.center(_df.format(DateTime.now()), font: thermalRegular, size: 8),
+        t.credit(thermalRegular, 7),
+      ]),
+    ));
+    return pdf.save();
+  }
+
+  // ── X Report PDF (mid-shift) ─────────────────────
+  Future<Uint8List> _buildXReportPDF(PdfPageFormat format, CashRegisterEntity reg, ReportData data) async {
+    final t = _layout(format: format);
+    final pdf = pw.Document();
+    final logoImg = await _getLogoImage();
+    final sym = _settings.currencySymbol;
+
+    pdf.addPage(pw.Page(
+      pageFormat: t.pageFormat,
+      build: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+        t.header(logo: logoImg, name: _settings.name, title: 'X REPORT', subtitle: '*** SHIFT SUMMARY ***'),
+        pw.SizedBox(height: 4),
+        t.dashedLine(h: 1.2),
+        t.row('Date', _dtf.format(DateTime.now()), size: 9, font: thermalRegular),
+        t.row('Time', _df.format(DateTime.now()), size: 9, font: thermalRegular),
+        t.dashedLine(),
+        t.section('ITEMS', font: thermalBold),
+        if (data.itemSales.isEmpty)
+          t.sub('  No items sold yet', size: 9, font: thermalRegular),
+        if (data.itemSales.isNotEmpty)
+          ...data.itemSales.map((s) => pw.Padding(
+            padding: const pw.EdgeInsets.only(bottom: 6),
+            child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+              t.item('${s.qty}x ${s.name}', '', size: 10, font: thermalBold),
+              t.sub('  $sym ${s.amount.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+            ]),
+          )),
+        t.dashedLine(h: 1.2),
+        pw.SizedBox(height: 4),
+        t.center('*** X REPORT — CONTINUES ***', font: thermalBold, size: 9),
         t.center(_df.format(DateTime.now()), font: thermalRegular, size: 8),
         t.credit(thermalRegular, 7),
       ]),

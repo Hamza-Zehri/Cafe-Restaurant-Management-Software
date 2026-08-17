@@ -253,18 +253,35 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
   }
 
   Future<void> _addFloor() async {
-    final ctrl = TextEditingController();
-    final name = await showDialog<String>(context: context, builder: (_) => AlertDialog(
+    final nameCtrl = TextEditingController();
+    final prefixCtrl = TextEditingController(text: 'T');
+    final result = await showDialog<({String name, String prefix})>(context: context, builder: (_) => AlertDialog(
       title: const Text('Add floor'),
-      content: TextField(controller: ctrl, autofocus: true, decoration: const InputDecoration(labelText: 'Floor name')),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(controller: nameCtrl, autofocus: true, decoration: const InputDecoration(labelText: 'Floor name')),
+        const SizedBox(height: 12),
+        TextField(controller: prefixCtrl, decoration: const InputDecoration(
+          labelText: 'Table prefix (e.g. T, R, F)',
+          hintText: 'Single letter or short text'),
+        ),
+      ]),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-        FilledButton(onPressed: () => Navigator.pop(context, ctrl.text), child: const Text('Add')),
+        FilledButton(onPressed: () {
+          final name = nameCtrl.text.trim();
+          final prefix = prefixCtrl.text.trim();
+          if (name.isNotEmpty && prefix.isNotEmpty) {
+            Navigator.pop(context, (name: name, prefix: prefix));
+          }
+        }, child: const Text('Add')),
       ],
     ));
-    if (name != null && name.isNotEmpty) {
-      await ref.read(dbProvider).into(ref.read(dbProvider).floors).insert(
-        FloorsCompanion.insert(name: name));
+    if (result != null) {
+      final db = ref.read(dbProvider);
+      await db.into(db.floors).insert(FloorsCompanion.insert(
+        name: result.name,
+        prefix: Value(result.prefix),
+      ));
       ref.invalidate(floorsProvider);
     }
   }
@@ -327,10 +344,20 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
     if (_selectedFloorId == -1) return;
     final db = ref.read(dbProvider);
     final existing = await db.tableDao.watchByFloor(_selectedFloorId).first;
-    final num = existing.length + 1;
+    final floorRows = await db.tableDao.allFloors();
+    final floor = floorRows.firstWhere((f) => f.id == _selectedFloorId, orElse: () => floorRows.first);
+    final prefix = floor.prefix;
+    var maxNum = 0;
+    for (final t in existing) {
+      if (t.name.startsWith(prefix)) {
+        final n = int.tryParse(t.name.substring(prefix.length));
+        if (n != null && n > maxNum) maxNum = n;
+      }
+    }
+    final newName = '$prefix${maxNum + 1}';
     await db.into(db.restaurantTables).insert(RestaurantTablesCompanion.insert(
       floorId: _selectedFloorId,
-      name: 'T$num',
+      name: newName,
       posX: const Value(100),
       posY: const Value(100),
     ));
