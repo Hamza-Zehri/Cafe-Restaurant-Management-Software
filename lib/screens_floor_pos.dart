@@ -62,15 +62,27 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
                     ),
                   ),
                   if (_editMode)
-                    Positioned(top: -6, right: -5, child: GestureDetector(
-                      onTap: () => _deleteFloor(f),
-                      child: Container(
-                        width: 17, height: 17,
-                        decoration: BoxDecoration(color: Colors.red.shade600, shape: BoxShape.circle,
-                          border: Border.all(color: context.elevated, width: 1.5)),
-                        child: const Icon(Icons.close, size: 11, color: Colors.white),
+                    Positioned(top: -6, right: -5, child: Row(children: [
+                      GestureDetector(
+                        onTap: () => _editFloor(f),
+                        child: Container(
+                          width: 17, height: 17,
+                          decoration: BoxDecoration(color: Colors.blue.shade600, shape: BoxShape.circle,
+                            border: Border.all(color: context.elevated, width: 1.5)),
+                          child: const Icon(Icons.edit, size: 10, color: Colors.white),
+                        ),
                       ),
-                    )),
+                      const SizedBox(width: 3),
+                      GestureDetector(
+                        onTap: () => _deleteFloor(f),
+                        child: Container(
+                          width: 17, height: 17,
+                          decoration: BoxDecoration(color: Colors.red.shade600, shape: BoxShape.circle,
+                            border: Border.all(color: context.elevated, width: 1.5)),
+                          child: const Icon(Icons.close, size: 11, color: Colors.white),
+                        ),
+                      ),
+                    ])),
                 ]),
               );
             }).toList()),
@@ -282,6 +294,39 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
         name: result.name,
         prefix: Value(result.prefix),
       ));
+      ref.invalidate(floorsProvider);
+    }
+  }
+
+  Future<void> _editFloor(FloorEntity floor) async {
+    final nameCtrl = TextEditingController(text: floor.name);
+    final prefixCtrl = TextEditingController(text: floor.prefix);
+    final result = await showDialog<({String name, String prefix})>(context: context, builder: (_) => AlertDialog(
+      title: Text('Edit "${floor.name}"'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(controller: nameCtrl, autofocus: true, decoration: const InputDecoration(labelText: 'Floor name')),
+        const SizedBox(height: 12),
+        TextField(controller: prefixCtrl, decoration: const InputDecoration(
+          labelText: 'Table prefix (e.g. T, R, F)',
+          hintText: 'Single letter or short text'),
+        ),
+      ]),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(onPressed: () {
+          final name = nameCtrl.text.trim();
+          final prefix = prefixCtrl.text.trim();
+          if (name.isNotEmpty && prefix.isNotEmpty) {
+            Navigator.pop(context, (name: name, prefix: prefix));
+          }
+        }, child: const Text('Save')),
+      ],
+    ));
+    if (result != null) {
+      final db = ref.read(dbProvider);
+      await (db.update(db.floors)..where((f) => f.id.equals(floor.id))).write(
+        FloorsCompanion(name: Value(result.name), prefix: Value(result.prefix)),
+      );
       ref.invalidate(floorsProvider);
     }
   }
@@ -626,6 +671,12 @@ class _POSScreenState extends ConsumerState<POSScreen> {
               icon: const Icon(Icons.receipt_long_rounded),
               tooltip: 'Print bill',
               onPressed: order.activeItems.isEmpty ? null : _printBill,
+            ),
+            IconButton(
+              icon: const Icon(Icons.cancel_rounded),
+              tooltip: 'Cancel order',
+              color: Colors.red,
+              onPressed: _voidOrder,
             ),
             PopupMenuButton(
               icon: const Icon(Icons.more_vert_rounded),

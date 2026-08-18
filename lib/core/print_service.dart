@@ -44,6 +44,7 @@ class ReportData {
   final int completedOrders;
   final int totalItemsSold;
   final int voidedOrders;
+  final List<String> cancelledOrderNumbers;
   final int kitchenGenerated;
   final int kitchenCompleted;
   final int voidedKitchen;
@@ -54,6 +55,7 @@ class ReportData {
     this.completedOrders = 0,
     this.totalItemsSold = 0,
     this.voidedOrders = 0,
+    this.cancelledOrderNumbers = const [],
     this.kitchenGenerated = 0,
     this.kitchenCompleted = 0,
     this.voidedKitchen = 0,
@@ -234,6 +236,7 @@ class PrintService {
       completedOrders: orders.where((o) => o.status == 'paid').length,
       totalItemsSold: totalItems,
       voidedOrders: orders.where((o) => o.status == 'cancelled').length,
+      cancelledOrderNumbers: orders.where((o) => o.status == 'cancelled').map((o) => o.orderNumber).toList(),
       kitchenGenerated: kitchenGenerated,
       kitchenCompleted: kitchenCompleted,
       voidedKitchen: voidedKitchen,
@@ -674,7 +677,12 @@ class PrintService {
         t.dashedLine(),
         t.section('KITCHEN', font: thermalBold),
         t.row('Tickets printed', '${reg.totalKitchenTickets}', size: 9, font: thermalRegular),
-        t.row('Void transactions', '${reg.totalVoids}', size: 9, font: thermalRegular),
+        t.row('Void transactions', '${data.cancelledOrderNumbers.length}', size: 9, font: thermalRegular),
+        if (data.cancelledOrderNumbers.isNotEmpty) ...[
+          pw.SizedBox(height: 4),
+          t.section('CANCELLED ORDERS', font: thermalBold),
+          ...data.cancelledOrderNumbers.map((n) => t.row('  #$n', '', size: 9, font: thermalRegular)),
+        ],
         pw.SizedBox(height: 4),
         t.dashedLine(h: 1.2),
         pw.SizedBox(height: 4),
