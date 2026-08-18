@@ -127,6 +127,7 @@ class Orders extends Table {
   RealColumn get discountAmount => real().withDefault(const Constant(0.0))();
   RealColumn get taxPercent => real().withDefault(const Constant(0.0))();
   RealColumn get serviceChargePercent => real().withDefault(const Constant(0.0))();
+  RealColumn get serviceChargeFixed => real().withDefault(const Constant(0.0))();
   TextColumn get notes => text().withDefault(const Constant(''))();
   IntColumn get kitchenTicketCount => integer().withDefault(const Constant(0))();
   IntColumn get guestCount => integer().withDefault(const Constant(1))();
@@ -595,7 +596,7 @@ class SettingsDao extends DatabaseAccessor<AppDatabase> with _$SettingsDaoMixin 
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _open());
 
-  @override int get schemaVersion => 3;
+  @override int get schemaVersion => 4;
 
   @override MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) async {
@@ -612,6 +613,9 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 3) {
         await m.addColumn(floors, floors.prefix);
+      }
+      if (from < 4) {
+        await m.addColumn(orders, orders.serviceChargeFixed);
       }
     },
   );

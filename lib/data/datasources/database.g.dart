@@ -2614,6 +2614,14 @@ class $OrdersTable extends Orders with TableInfo<$OrdersTable, Order> {
           type: DriftSqlType.double,
           requiredDuringInsert: false,
           defaultValue: const Constant(0.0));
+  static const VerificationMeta _serviceChargeFixedMeta =
+      const VerificationMeta('serviceChargeFixed');
+  @override
+  late final GeneratedColumn<double> serviceChargeFixed =
+      GeneratedColumn<double>('service_charge_fixed', aliasedName, false,
+          type: DriftSqlType.double,
+          requiredDuringInsert: false,
+          defaultValue: const Constant(0.0));
   static const VerificationMeta _notesMeta = const VerificationMeta('notes');
   @override
   late final GeneratedColumn<String> notes = GeneratedColumn<String>(
@@ -2663,6 +2671,7 @@ class $OrdersTable extends Orders with TableInfo<$OrdersTable, Order> {
         discountAmount,
         taxPercent,
         serviceChargePercent,
+        serviceChargeFixed,
         notes,
         kitchenTicketCount,
         guestCount,
@@ -2746,6 +2755,12 @@ class $OrdersTable extends Orders with TableInfo<$OrdersTable, Order> {
           serviceChargePercent.isAcceptableOrUnknown(
               data['service_charge_percent']!, _serviceChargePercentMeta));
     }
+    if (data.containsKey('service_charge_fixed')) {
+      context.handle(
+          _serviceChargeFixedMeta,
+          serviceChargeFixed.isAcceptableOrUnknown(
+              data['service_charge_fixed']!, _serviceChargeFixedMeta));
+    }
     if (data.containsKey('notes')) {
       context.handle(
           _notesMeta, notes.isAcceptableOrUnknown(data['notes']!, _notesMeta));
@@ -2802,6 +2817,8 @@ class $OrdersTable extends Orders with TableInfo<$OrdersTable, Order> {
       serviceChargePercent: attachedDatabase.typeMapping.read(
           DriftSqlType.double,
           data['${effectivePrefix}service_charge_percent'])!,
+      serviceChargeFixed: attachedDatabase.typeMapping.read(
+          DriftSqlType.double, data['${effectivePrefix}service_charge_fixed'])!,
       notes: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}notes'])!,
       kitchenTicketCount: attachedDatabase.typeMapping.read(
@@ -2833,6 +2850,7 @@ class Order extends DataClass implements Insertable<Order> {
   final double discountAmount;
   final double taxPercent;
   final double serviceChargePercent;
+  final double serviceChargeFixed;
   final String notes;
   final int kitchenTicketCount;
   final int guestCount;
@@ -2850,6 +2868,7 @@ class Order extends DataClass implements Insertable<Order> {
       required this.discountAmount,
       required this.taxPercent,
       required this.serviceChargePercent,
+      required this.serviceChargeFixed,
       required this.notes,
       required this.kitchenTicketCount,
       required this.guestCount,
@@ -2869,6 +2888,7 @@ class Order extends DataClass implements Insertable<Order> {
     map['discount_amount'] = Variable<double>(discountAmount);
     map['tax_percent'] = Variable<double>(taxPercent);
     map['service_charge_percent'] = Variable<double>(serviceChargePercent);
+    map['service_charge_fixed'] = Variable<double>(serviceChargeFixed);
     map['notes'] = Variable<String>(notes);
     map['kitchen_ticket_count'] = Variable<int>(kitchenTicketCount);
     map['guest_count'] = Variable<int>(guestCount);
@@ -2892,6 +2912,7 @@ class Order extends DataClass implements Insertable<Order> {
       discountAmount: Value(discountAmount),
       taxPercent: Value(taxPercent),
       serviceChargePercent: Value(serviceChargePercent),
+      serviceChargeFixed: Value(serviceChargeFixed),
       notes: Value(notes),
       kitchenTicketCount: Value(kitchenTicketCount),
       guestCount: Value(guestCount),
@@ -2917,6 +2938,8 @@ class Order extends DataClass implements Insertable<Order> {
       taxPercent: serializer.fromJson<double>(json['taxPercent']),
       serviceChargePercent:
           serializer.fromJson<double>(json['serviceChargePercent']),
+      serviceChargeFixed:
+          serializer.fromJson<double>(json['serviceChargeFixed']),
       notes: serializer.fromJson<String>(json['notes']),
       kitchenTicketCount: serializer.fromJson<int>(json['kitchenTicketCount']),
       guestCount: serializer.fromJson<int>(json['guestCount']),
@@ -2939,6 +2962,7 @@ class Order extends DataClass implements Insertable<Order> {
       'discountAmount': serializer.toJson<double>(discountAmount),
       'taxPercent': serializer.toJson<double>(taxPercent),
       'serviceChargePercent': serializer.toJson<double>(serviceChargePercent),
+      'serviceChargeFixed': serializer.toJson<double>(serviceChargeFixed),
       'notes': serializer.toJson<String>(notes),
       'kitchenTicketCount': serializer.toJson<int>(kitchenTicketCount),
       'guestCount': serializer.toJson<int>(guestCount),
@@ -2959,6 +2983,7 @@ class Order extends DataClass implements Insertable<Order> {
           double? discountAmount,
           double? taxPercent,
           double? serviceChargePercent,
+          double? serviceChargeFixed,
           String? notes,
           int? kitchenTicketCount,
           int? guestCount,
@@ -2976,6 +3001,7 @@ class Order extends DataClass implements Insertable<Order> {
         discountAmount: discountAmount ?? this.discountAmount,
         taxPercent: taxPercent ?? this.taxPercent,
         serviceChargePercent: serviceChargePercent ?? this.serviceChargePercent,
+        serviceChargeFixed: serviceChargeFixed ?? this.serviceChargeFixed,
         notes: notes ?? this.notes,
         kitchenTicketCount: kitchenTicketCount ?? this.kitchenTicketCount,
         guestCount: guestCount ?? this.guestCount,
@@ -3006,6 +3032,9 @@ class Order extends DataClass implements Insertable<Order> {
       serviceChargePercent: data.serviceChargePercent.present
           ? data.serviceChargePercent.value
           : this.serviceChargePercent,
+      serviceChargeFixed: data.serviceChargeFixed.present
+          ? data.serviceChargeFixed.value
+          : this.serviceChargeFixed,
       notes: data.notes.present ? data.notes.value : this.notes,
       kitchenTicketCount: data.kitchenTicketCount.present
           ? data.kitchenTicketCount.value
@@ -3031,6 +3060,7 @@ class Order extends DataClass implements Insertable<Order> {
           ..write('discountAmount: $discountAmount, ')
           ..write('taxPercent: $taxPercent, ')
           ..write('serviceChargePercent: $serviceChargePercent, ')
+          ..write('serviceChargeFixed: $serviceChargeFixed, ')
           ..write('notes: $notes, ')
           ..write('kitchenTicketCount: $kitchenTicketCount, ')
           ..write('guestCount: $guestCount, ')
@@ -3053,6 +3083,7 @@ class Order extends DataClass implements Insertable<Order> {
       discountAmount,
       taxPercent,
       serviceChargePercent,
+      serviceChargeFixed,
       notes,
       kitchenTicketCount,
       guestCount,
@@ -3073,6 +3104,7 @@ class Order extends DataClass implements Insertable<Order> {
           other.discountAmount == this.discountAmount &&
           other.taxPercent == this.taxPercent &&
           other.serviceChargePercent == this.serviceChargePercent &&
+          other.serviceChargeFixed == this.serviceChargeFixed &&
           other.notes == this.notes &&
           other.kitchenTicketCount == this.kitchenTicketCount &&
           other.guestCount == this.guestCount &&
@@ -3092,6 +3124,7 @@ class OrdersCompanion extends UpdateCompanion<Order> {
   final Value<double> discountAmount;
   final Value<double> taxPercent;
   final Value<double> serviceChargePercent;
+  final Value<double> serviceChargeFixed;
   final Value<String> notes;
   final Value<int> kitchenTicketCount;
   final Value<int> guestCount;
@@ -3109,6 +3142,7 @@ class OrdersCompanion extends UpdateCompanion<Order> {
     this.discountAmount = const Value.absent(),
     this.taxPercent = const Value.absent(),
     this.serviceChargePercent = const Value.absent(),
+    this.serviceChargeFixed = const Value.absent(),
     this.notes = const Value.absent(),
     this.kitchenTicketCount = const Value.absent(),
     this.guestCount = const Value.absent(),
@@ -3127,6 +3161,7 @@ class OrdersCompanion extends UpdateCompanion<Order> {
     this.discountAmount = const Value.absent(),
     this.taxPercent = const Value.absent(),
     this.serviceChargePercent = const Value.absent(),
+    this.serviceChargeFixed = const Value.absent(),
     this.notes = const Value.absent(),
     this.kitchenTicketCount = const Value.absent(),
     this.guestCount = const Value.absent(),
@@ -3149,6 +3184,7 @@ class OrdersCompanion extends UpdateCompanion<Order> {
     Expression<double>? discountAmount,
     Expression<double>? taxPercent,
     Expression<double>? serviceChargePercent,
+    Expression<double>? serviceChargeFixed,
     Expression<String>? notes,
     Expression<int>? kitchenTicketCount,
     Expression<int>? guestCount,
@@ -3168,6 +3204,8 @@ class OrdersCompanion extends UpdateCompanion<Order> {
       if (taxPercent != null) 'tax_percent': taxPercent,
       if (serviceChargePercent != null)
         'service_charge_percent': serviceChargePercent,
+      if (serviceChargeFixed != null)
+        'service_charge_fixed': serviceChargeFixed,
       if (notes != null) 'notes': notes,
       if (kitchenTicketCount != null)
         'kitchen_ticket_count': kitchenTicketCount,
@@ -3189,6 +3227,7 @@ class OrdersCompanion extends UpdateCompanion<Order> {
       Value<double>? discountAmount,
       Value<double>? taxPercent,
       Value<double>? serviceChargePercent,
+      Value<double>? serviceChargeFixed,
       Value<String>? notes,
       Value<int>? kitchenTicketCount,
       Value<int>? guestCount,
@@ -3206,6 +3245,7 @@ class OrdersCompanion extends UpdateCompanion<Order> {
       discountAmount: discountAmount ?? this.discountAmount,
       taxPercent: taxPercent ?? this.taxPercent,
       serviceChargePercent: serviceChargePercent ?? this.serviceChargePercent,
+      serviceChargeFixed: serviceChargeFixed ?? this.serviceChargeFixed,
       notes: notes ?? this.notes,
       kitchenTicketCount: kitchenTicketCount ?? this.kitchenTicketCount,
       guestCount: guestCount ?? this.guestCount,
@@ -3251,6 +3291,9 @@ class OrdersCompanion extends UpdateCompanion<Order> {
       map['service_charge_percent'] =
           Variable<double>(serviceChargePercent.value);
     }
+    if (serviceChargeFixed.present) {
+      map['service_charge_fixed'] = Variable<double>(serviceChargeFixed.value);
+    }
     if (notes.present) {
       map['notes'] = Variable<String>(notes.value);
     }
@@ -3283,6 +3326,7 @@ class OrdersCompanion extends UpdateCompanion<Order> {
           ..write('discountAmount: $discountAmount, ')
           ..write('taxPercent: $taxPercent, ')
           ..write('serviceChargePercent: $serviceChargePercent, ')
+          ..write('serviceChargeFixed: $serviceChargeFixed, ')
           ..write('notes: $notes, ')
           ..write('kitchenTicketCount: $kitchenTicketCount, ')
           ..write('guestCount: $guestCount, ')
@@ -11540,6 +11584,7 @@ typedef $$OrdersTableCreateCompanionBuilder = OrdersCompanion Function({
   Value<double> discountAmount,
   Value<double> taxPercent,
   Value<double> serviceChargePercent,
+  Value<double> serviceChargeFixed,
   Value<String> notes,
   Value<int> kitchenTicketCount,
   Value<int> guestCount,
@@ -11558,6 +11603,7 @@ typedef $$OrdersTableUpdateCompanionBuilder = OrdersCompanion Function({
   Value<double> discountAmount,
   Value<double> taxPercent,
   Value<double> serviceChargePercent,
+  Value<double> serviceChargeFixed,
   Value<String> notes,
   Value<int> kitchenTicketCount,
   Value<int> guestCount,
@@ -11665,6 +11711,10 @@ class $$OrdersTableFilterComposer
 
   ColumnFilters<double> get serviceChargePercent => $composableBuilder(
       column: $table.serviceChargePercent,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<double> get serviceChargeFixed => $composableBuilder(
+      column: $table.serviceChargeFixed,
       builder: (column) => ColumnFilters(column));
 
   ColumnFilters<String> get notes => $composableBuilder(
@@ -11806,6 +11856,10 @@ class $$OrdersTableOrderingComposer
       column: $table.serviceChargePercent,
       builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<double> get serviceChargeFixed => $composableBuilder(
+      column: $table.serviceChargeFixed,
+      builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<String> get notes => $composableBuilder(
       column: $table.notes, builder: (column) => ColumnOrderings(column));
 
@@ -11898,6 +11952,9 @@ class $$OrdersTableAnnotationComposer
 
   GeneratedColumn<double> get serviceChargePercent => $composableBuilder(
       column: $table.serviceChargePercent, builder: (column) => column);
+
+  GeneratedColumn<double> get serviceChargeFixed => $composableBuilder(
+      column: $table.serviceChargeFixed, builder: (column) => column);
 
   GeneratedColumn<String> get notes =>
       $composableBuilder(column: $table.notes, builder: (column) => column);
@@ -12035,6 +12092,7 @@ class $$OrdersTableTableManager extends RootTableManager<
             Value<double> discountAmount = const Value.absent(),
             Value<double> taxPercent = const Value.absent(),
             Value<double> serviceChargePercent = const Value.absent(),
+            Value<double> serviceChargeFixed = const Value.absent(),
             Value<String> notes = const Value.absent(),
             Value<int> kitchenTicketCount = const Value.absent(),
             Value<int> guestCount = const Value.absent(),
@@ -12053,6 +12111,7 @@ class $$OrdersTableTableManager extends RootTableManager<
             discountAmount: discountAmount,
             taxPercent: taxPercent,
             serviceChargePercent: serviceChargePercent,
+            serviceChargeFixed: serviceChargeFixed,
             notes: notes,
             kitchenTicketCount: kitchenTicketCount,
             guestCount: guestCount,
@@ -12071,6 +12130,7 @@ class $$OrdersTableTableManager extends RootTableManager<
             Value<double> discountAmount = const Value.absent(),
             Value<double> taxPercent = const Value.absent(),
             Value<double> serviceChargePercent = const Value.absent(),
+            Value<double> serviceChargeFixed = const Value.absent(),
             Value<String> notes = const Value.absent(),
             Value<int> kitchenTicketCount = const Value.absent(),
             Value<int> guestCount = const Value.absent(),
@@ -12089,6 +12149,7 @@ class $$OrdersTableTableManager extends RootTableManager<
             discountAmount: discountAmount,
             taxPercent: taxPercent,
             serviceChargePercent: serviceChargePercent,
+            serviceChargeFixed: serviceChargeFixed,
             notes: notes,
             kitchenTicketCount: kitchenTicketCount,
             guestCount: guestCount,

@@ -253,7 +253,7 @@ class OrderEntity {
     required this.tableName, required this.waiterId, required this.waiterName,
     required this.items, required this.status,
     this.discountPercent = 0, this.discountAmount = 0,
-    this.taxPercent = 0, this.serviceChargePercent = 0,
+    this.taxPercent = 0, this.serviceChargePercent = 0, this.serviceChargeFixed = 0,
     this.notes = '', required this.createdAt, this.paidAt,
     this.kitchenTicketCount = 0, this.guestCount = 1,
   });
@@ -269,6 +269,7 @@ class OrderEntity {
   final double discountAmount;
   final double taxPercent;
   final double serviceChargePercent;
+  final double serviceChargeFixed;
   final String notes;
   final DateTime createdAt;
   final DateTime? paidAt;
@@ -280,7 +281,8 @@ class OrderEntity {
   double get discountValue => discountAmount + (subtotal * discountPercent / 100);
   double get afterDiscount => subtotal - discountValue;
   double get taxValue => afterDiscount * taxPercent / 100;
-  double get serviceChargeValue => afterDiscount * serviceChargePercent / 100;
+  double get serviceChargePercentValue => afterDiscount * serviceChargePercent / 100;
+  double get serviceChargeValue => serviceChargeFixed + serviceChargePercentValue;
   double get grandTotal => afterDiscount + taxValue + serviceChargeValue;
   int get totalItems => activeItems.fold(0, (s, i) => s + i.quantity);
 
@@ -453,7 +455,8 @@ class RestaurantSettings {
     this.footerMessage = 'Thank you for dining with us!',
     this.logoPath,
     this.taxPercent = 17.0,
-    this.serviceChargePercent = 10.0,
+    this.serviceChargePercent = 0.0,
+    this.serviceChargeFixed = 0.0,
     this.currencySymbol = 'Rs',
     this.receiptWidth = 80,
     this.printerMode = 'pdf',
@@ -477,6 +480,7 @@ class RestaurantSettings {
   final String? logoPath;
   final double taxPercent;
   final double serviceChargePercent;
+  final double serviceChargeFixed;
   final String currencySymbol;
   final int receiptWidth;
   final String printerMode;
@@ -493,7 +497,7 @@ class RestaurantSettings {
   RestaurantSettings copyWith({
     String? name, String? address, String? phone, String? email,
     String? taxNumber, String? footerMessage, String? logoPath,
-    double? taxPercent, double? serviceChargePercent, String? currencySymbol,
+    double? taxPercent, double? serviceChargePercent, double? serviceChargeFixed, String? currencySymbol,
     int? receiptWidth, bool? autoKitchenPrint, bool? autoPrintBillOnPay,
     String? printerMode, String? selectedPrinterName,
     bool? autoBackupEnabled, String? autoBackupInterval, String? autoBackupDestFolder,
@@ -506,6 +510,7 @@ class RestaurantSettings {
     logoPath: logoPath ?? this.logoPath,
     taxPercent: taxPercent ?? this.taxPercent,
     serviceChargePercent: serviceChargePercent ?? this.serviceChargePercent,
+    serviceChargeFixed: serviceChargeFixed ?? this.serviceChargeFixed,
     currencySymbol: currencySymbol ?? this.currencySymbol,
     receiptWidth: receiptWidth ?? this.receiptWidth,
     printerMode: printerMode ?? this.printerMode,

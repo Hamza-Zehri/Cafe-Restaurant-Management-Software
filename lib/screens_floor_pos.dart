@@ -1526,7 +1526,8 @@ class _CartPanel extends ConsumerWidget {
               _SummaryRow('Subtotal', o.subtotal, settings.currencySymbol),
               if (o.discountValue > 0) _SummaryRow('Discount', -o.discountValue, settings.currencySymbol, color: Colors.green),
               if (o.taxValue > 0) _SummaryRow('GST (${o.taxPercent.toStringAsFixed(0)}%)', o.taxValue, settings.currencySymbol),
-              if (o.serviceChargeValue > 0) _SummaryRow('Service (${o.serviceChargePercent.toStringAsFixed(0)}%)', o.serviceChargeValue, settings.currencySymbol),
+              if (o.serviceChargeFixed > 0) _SummaryRow('Service Charge', o.serviceChargeFixed, settings.currencySymbol),
+              if (o.serviceChargePercentValue > 0) _SummaryRow('Service (${o.serviceChargePercent.toStringAsFixed(0)}%)', o.serviceChargePercentValue, settings.currencySymbol),
               const Divider(height: 12),
               Row(children: [
                 Text('Total', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),

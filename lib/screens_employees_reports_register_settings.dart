@@ -1854,7 +1854,7 @@ class _ReceiptTaxSettings extends ConsumerStatefulWidget {
 }
 
 class _ReceiptTaxSettingsState extends ConsumerState<_ReceiptTaxSettings> {
-  late TextEditingController _tax, _svc, _sym;
+  late TextEditingController _tax, _svc, _svcFixed, _sym;
   late bool _autoKitchen, _autoPrint;
 
   @override
@@ -1862,12 +1862,13 @@ class _ReceiptTaxSettingsState extends ConsumerState<_ReceiptTaxSettings> {
     super.initState();
     _tax  = TextEditingController(text: widget.settings.taxPercent.toStringAsFixed(0));
     _svc  = TextEditingController(text: widget.settings.serviceChargePercent.toStringAsFixed(0));
+    _svcFixed = TextEditingController(text: widget.settings.serviceChargeFixed.toStringAsFixed(0));
     _sym  = TextEditingController(text: widget.settings.currencySymbol);
     _autoKitchen = widget.settings.autoKitchenPrint;
     _autoPrint   = widget.settings.autoPrintBillOnPay;
   }
 
-  @override void dispose() { _tax.dispose(); _svc.dispose(); _sym.dispose(); super.dispose(); }
+  @override void dispose() { _tax.dispose(); _svc.dispose(); _svcFixed.dispose(); _sym.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) => SingleChildScrollView(
@@ -1879,7 +1880,12 @@ class _ReceiptTaxSettingsState extends ConsumerState<_ReceiptTaxSettings> {
         Row(children: [
           Expanded(child: TextField(controller: _tax, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'GST / Tax %', suffixText: '%'))),
           const SizedBox(width: 12),
+          Expanded(child: TextField(controller: _svcFixed, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Service charge (fixed amount)'))),
+          const SizedBox(width: 12),
           Expanded(child: TextField(controller: _svc, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Service charge %', suffixText: '%'))),
+        ]),
+        const SizedBox(height: 6),
+        Row(children: [
           const SizedBox(width: 12),
           Expanded(child: TextField(controller: _sym, decoration: const InputDecoration(labelText: 'Currency symbol (e.g. Rs'))),
         ]),
@@ -1910,7 +1916,8 @@ class _ReceiptTaxSettingsState extends ConsumerState<_ReceiptTaxSettings> {
         onPressed: () async {
           await ref.read(settingsProvider.notifier).save(widget.settings.copyWith(
             taxPercent: double.tryParse(_tax.text) ?? 17,
-            serviceChargePercent: double.tryParse(_svc.text) ?? 10,
+            serviceChargePercent: double.tryParse(_svc.text) ?? 0,
+            serviceChargeFixed: double.tryParse(_svcFixed.text) ?? 0,
             currencySymbol: _sym.text,
             receiptWidth: 80,
             autoKitchenPrint: _autoKitchen,

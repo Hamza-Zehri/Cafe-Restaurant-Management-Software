@@ -173,7 +173,7 @@ class PrintService {
 
   // ── Layout helper ──────────────────────────────────
   // Always 80mm thermal — identical layout for PDF and thermal print.
-  static final _fixedLayout = ThermalLayout(paperWidthMm: 80, marginMm: 4);
+  static final _fixedLayout = ThermalLayout(paperWidthMm: 80, marginMm: 5);
 
   ThermalLayout _layout({PdfPageFormat? format}) {
     if (format != null) return ThermalLayout.fromFormat(format);
@@ -417,8 +417,10 @@ class PrintService {
             t.row('DISCOUNT', '-${_settings.currencySymbol} ${order.discountValue.toStringAsFixed(0)}', size: 9, font: thermalRegular),
           if (order.taxValue > 0)
             t.row('TAX (${order.taxPercent.toStringAsFixed(0)}%)', '${_settings.currencySymbol} ${order.taxValue.toStringAsFixed(0)}', size: 9, font: thermalRegular),
-          if (order.serviceChargeValue > 0)
-            t.row('SERVICE (${order.serviceChargePercent.toStringAsFixed(0)}%)', '${_settings.currencySymbol} ${order.serviceChargeValue.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+          if (order.serviceChargeFixed > 0)
+            t.row('SERVICE CHARGE', '${_settings.currencySymbol} ${order.serviceChargeFixed.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+          if (order.serviceChargePercentValue > 0)
+            t.row('SERVICE (${order.serviceChargePercent.toStringAsFixed(0)}%)', '${_settings.currencySymbol} ${order.serviceChargePercentValue.toStringAsFixed(0)}', size: 9, font: thermalRegular),
           pw.SizedBox(height: 3),
           t.dashedLine(h: 1.4),
           pw.SizedBox(height: 3),
@@ -499,7 +501,7 @@ class PrintService {
           if (inv.taxValue > 0)
             t.row('TAX (${_settings.taxPercent.toStringAsFixed(0)}%)', '${_settings.currencySymbol} ${inv.taxValue.toStringAsFixed(0)}', size: 9, font: thermalRegular),
           if (inv.serviceChargeValue > 0)
-            t.row('SERVICE (${_settings.serviceChargePercent.toStringAsFixed(0)}%)', '${_settings.currencySymbol} ${inv.serviceChargeValue.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+            t.row('SERVICE CHARGE', '${_settings.currencySymbol} ${inv.serviceChargeValue.toStringAsFixed(0)}', size: 9, font: thermalRegular),
           pw.SizedBox(height: 3),
           t.dashedLine(h: 1.4),
           pw.SizedBox(height: 3),

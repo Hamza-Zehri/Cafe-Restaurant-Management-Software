@@ -137,7 +137,8 @@ class SettingsNotifier extends StateNotifier<RestaurantSettings> {
       footerMessage: s['receipt_footer'] ?? 'Thank you for dining with us!',
       logoPath: s['logo_path'],
       taxPercent: double.tryParse(s['tax_percent'] ?? '') ?? 17.0,
-      serviceChargePercent: double.tryParse(s['service_charge_percent'] ?? '') ?? 10.0,
+      serviceChargePercent: double.tryParse(s['service_charge_percent'] ?? '') ?? 0.0,
+      serviceChargeFixed: double.tryParse(s['service_charge_fixed'] ?? '') ?? 0.0,
       currencySymbol: s['currency_symbol'] ?? 'Rs',
       receiptWidth: int.tryParse(s['receipt_width'] ?? '') ?? 80,
       printerMode: s['printer_mode'] ?? 'pdf',
@@ -163,6 +164,7 @@ class SettingsNotifier extends StateNotifier<RestaurantSettings> {
     if (s.logoPath != null) await _db.settingsDao.set('logo_path', s.logoPath!);
     await _db.settingsDao.set('tax_percent', s.taxPercent.toString());
     await _db.settingsDao.set('service_charge_percent', s.serviceChargePercent.toString());
+    await _db.settingsDao.set('service_charge_fixed', s.serviceChargeFixed.toString());
     await _db.settingsDao.set('currency_symbol', s.currencySymbol);
     await _db.settingsDao.set('receipt_width', s.receiptWidth.toString());
     await _db.settingsDao.set('printer_mode', s.printerMode);
@@ -305,7 +307,7 @@ Future<OrderEntity> _buildOrder(AppDatabase db, OrderRow r) async {
     waiterId: r.waiterId, waiterName: r.waiterName, items: items,
     status: _orderStatus(r.status), discountPercent: r.discountPercent,
     discountAmount: r.discountAmount, taxPercent: r.taxPercent,
-    serviceChargePercent: r.serviceChargePercent, notes: r.notes,
+    serviceChargePercent: r.serviceChargePercent, serviceChargeFixed: r.serviceChargeFixed, notes: r.notes,
     kitchenTicketCount: r.kitchenTicketCount, guestCount: r.guestCount,
     createdAt: r.createdAt, paidAt: r.paidAt,
   );
@@ -355,7 +357,8 @@ class POSNotifier extends StateNotifier<AsyncValue<OrderEntity?>> {
       waiterName: resolvedWaiterName,
       guestCount: Value(guestCount),
       taxPercent: Value(double.tryParse(settings['tax_percent'] ?? '') ?? 17.0),
-      serviceChargePercent: Value(double.tryParse(settings['service_charge_percent'] ?? '') ?? 10.0),
+      serviceChargePercent: Value(double.tryParse(settings['service_charge_percent'] ?? '') ?? 0.0),
+      serviceChargeFixed: Value(double.tryParse(settings['service_charge_fixed'] ?? '') ?? 0.0),
     ));
 
     await _db.tableDao.setStatus(_tableId, 'occupied',
