@@ -36,7 +36,7 @@ class ThermalLogo {
 class ThermalLayout {
   /// Assumed paper geometry: [paperWidthMm] wide with [marginMm] of safe
   /// border on each side (used for PDF save mode and previews).
-  ThermalLayout({double paperWidthMm = 80, double marginMm = 4}) {
+  ThermalLayout({double paperWidthMm = 80, double marginMm = 2}) {
     paperWidth = paperWidthMm * PdfPageFormat.mm;
     safeMargin = marginMm * PdfPageFormat.mm;
     contentWidth = paperWidth - safeMargin * 2;
