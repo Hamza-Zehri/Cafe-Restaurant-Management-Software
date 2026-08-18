@@ -173,7 +173,7 @@ class PrintService {
 
   // ── Layout helper ──────────────────────────────────
   // Always 80mm thermal — identical layout for PDF and thermal print.
-  static final _fixedLayout = ThermalLayout(paperWidthMm: 80, marginMm: 5);
+  static final _fixedLayout = ThermalLayout(paperWidthMm: 80, marginMm: 2);
 
   ThermalLayout _layout({PdfPageFormat? format}) {
     if (format != null) return ThermalLayout.fromFormat(format);
