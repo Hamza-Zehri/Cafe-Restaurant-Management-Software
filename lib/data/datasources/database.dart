@@ -440,6 +440,22 @@ class OrderDao extends DatabaseAccessor<AppDatabase> with _$OrderDaoMixin {
     (select(orders)
       ..where((o) => o.status.equals('paid') & o.paidAt.isBiggerThanValue(since))
       ..orderBy([(o) => OrderingTerm.desc(o.paidAt)])).get();
+  // Kitchen: cancelled orders — since the current register opened
+  Future<List<OrderRow>> cancelledToday(DateTime since) =>
+    (select(orders)
+      ..where((o) => o.status.equals('cancelled') & o.createdAt.isBiggerThanValue(since) & o.kitchenTicketCount.isBiggerOrEqualValue(1))
+      ..orderBy([(o) => OrderingTerm.desc(o.createdAt)])).get();
+  // Stream variants for real-time kitchen display
+  Stream<List<OrderRow>> watchKitchenPending() =>
+    (select(orders)..where((o) => o.status.equals('kitchenSent'))..orderBy([(o) => OrderingTerm.asc(o.createdAt)])).watch();
+  Stream<List<OrderRow>> watchDoneToday(DateTime since) =>
+    (select(orders)
+      ..where((o) => o.status.equals('paid') & o.paidAt.isBiggerThanValue(since))
+      ..orderBy([(o) => OrderingTerm.desc(o.paidAt)])).watch();
+  Stream<List<OrderRow>> watchCancelledToday(DateTime since) =>
+    (select(orders)
+      ..where((o) => o.status.equals('cancelled') & o.createdAt.isBiggerThanValue(since) & o.kitchenTicketCount.isBiggerOrEqualValue(1))
+      ..orderBy([(o) => OrderingTerm.desc(o.createdAt)])).watch();
 }
 
 @DriftAccessor(tables: [Invoices])
@@ -475,6 +491,8 @@ class RegisterDao extends DatabaseAccessor<AppDatabase> with _$RegisterDaoMixin 
   RegisterDao(super.db);
   Future<CashRegisterRow?> openRegister() =>
     (select(cashRegisters)..where((r) => r.status.equals('open'))).getSingleOrNull();
+  Stream<CashRegisterRow?> watchOpenRegister() =>
+    (select(cashRegisters)..where((r) => r.status.equals('open'))).watchSingleOrNull();
   Future<int> open(CashRegistersCompanion c) => into(cashRegisters).insert(c);
   Future<void> update_(int id, CashRegistersCompanion c) =>
     (update(cashRegisters)..where((r) => r.id.equals(id))).write(c);

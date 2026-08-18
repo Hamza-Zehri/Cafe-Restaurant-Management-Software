@@ -11,27 +11,12 @@ class KitchenScreen extends ConsumerStatefulWidget {
 }
 
 class _KitchenScreenState extends ConsumerState<KitchenScreen> {
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    // Auto-refresh every 15 seconds
-    _timer = Timer.periodic(const Duration(seconds: 15),
-        (_) => ref.read(kitchenProvider.notifier).refresh());
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
     final kitchen = ref.watch(kitchenProvider);
     final active = kitchen.active;
     final done = kitchen.done;
+    final cancelled = kitchen.cancelled;
     final isDark = context.isDark;
 
     return SideNav(
@@ -85,13 +70,21 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
               label: 'Done',
               value: done.length,
             ),
+            const SizedBox(width: 16),
+            if (cancelled.isNotEmpty)
+              _KitchenStat(
+                color: Colors.red,
+                icon: Icons.cancel_rounded,
+                label: 'Cancelled',
+                value: cancelled.length,
+              ),
             const Spacer(),
             Text('Bill paid moves the order to Done',
                 style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
           ]),
         ),
         Expanded(
-          child: active.isEmpty && done.isEmpty
+          child: active.isEmpty && done.isEmpty && cancelled.isEmpty
               ? Center(
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
                   Icon(Icons.kitchen_rounded,
@@ -129,6 +122,20 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
                       ]),
                       const SizedBox(height: 8),
                       ...done.map((o) => _DoneTableCard(order: o)),
+                    ],
+                    if (cancelled.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      Row(children: [
+                        const Icon(Icons.cancel_rounded,
+                            size: 16, color: Colors.red),
+                        const SizedBox(width: 6),
+                        Text('Cancelled (${cancelled.length})',
+                            style: context.tt.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                                color: Colors.red)),
+                      ]),
+                      const SizedBox(height: 8),
+                      ...cancelled.map((o) => _CancelledTableCard(order: o)),
                     ],
                   ],
                 ),
@@ -632,6 +639,119 @@ class _DoneTableCard extends StatelessWidget {
                 Text(item.isVoided ? 'voided' : '×${item.quantity}',
                     style: TextStyle(fontSize: 11,
                       color: item.isVoided ? Colors.red : Theme.of(context).colorScheme.onSurfaceVariant)),
+              ]),
+            )),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+}
+
+// Read-only card showing a table whose order was cancelled from POS.
+class _CancelledTableCard extends StatelessWidget {
+  const _CancelledTableCard({required this.order});
+  final OrderEntity order;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = context.isDark;
+    return GestureDetector(
+      onTap: () => _showCancelledOrderDetail(context, order),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.darkCard : Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.red.withAlpha(70)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(children: [
+            Container(
+              width: 34, height: 34,
+              decoration: BoxDecoration(
+                  color: Colors.red.withAlpha(20), shape: BoxShape.circle),
+              child: const Icon(Icons.cancel_rounded,
+                  color: Colors.red, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Text(order.tableName,
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: Colors.red)),
+                const SizedBox(width: 8),
+                Text('#${order.orderNumber}',
+                    style: TextStyle(fontSize: 11, color: Colors.red.withAlpha(180))),
+              ]),
+              const SizedBox(height: 2),
+              Text('Cancelled',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.red,
+                      fontWeight: FontWeight.w700)),
+            ]),
+            const Spacer(),
+            Text('${order.items.length} items',
+                style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+            const SizedBox(width: 6),
+            Icon(Icons.chevron_right_rounded, size: 18, color: context.cs.onSurfaceVariant),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  static void _showCancelledOrderDetail(BuildContext context, OrderEntity o) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Row(children: [
+          const Icon(Icons.cancel_rounded, color: Colors.red, size: 20),
+          const SizedBox(width: 8),
+          Text(o.tableName, style: const TextStyle(fontWeight: FontWeight.w800, color: Colors.red)),
+          const SizedBox(width: 8),
+          Text('#${o.orderNumber}', style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+        ]),
+        content: SizedBox(
+          width: 380,
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Icon(Icons.person_outline, size: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              const SizedBox(width: 4),
+              Text(o.waiterName, style: const TextStyle(fontSize: 12)),
+              const SizedBox(width: 12),
+              Icon(Icons.group_outlined, size: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              const SizedBox(width: 4),
+              Text('${o.guestCount} guests', style: const TextStyle(fontSize: 12)),
+            ]),
+            const SizedBox(height: 12),
+            ...o.items.map((item) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(children: [
+                Container(
+                  width: 24, height: 24,
+                  decoration: BoxDecoration(
+                    color: (item.isVoided ? Colors.red : Colors.red.withAlpha(25)).withAlpha(25),
+                    borderRadius: BorderRadius.circular(5),
+                    border: Border.all(color: Colors.red.withAlpha(60)),
+                  ),
+                  child: item.isVoided
+                    ? const Center(child: Icon(Icons.cancel_outlined, size: 12, color: Colors.red))
+                    : Center(child: Text('×${item.quantity}',
+                        style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w800, fontSize: 11))),
+                ),
+                const SizedBox(width: 8),
+                Expanded(child: Text(item.menuItem.name,
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+                      decoration: item.isVoided ? TextDecoration.lineThrough : null,
+                      color: item.isVoided ? Colors.red : null))),
+                Text(item.isVoided ? 'voided' : '×${item.quantity}',
+                    style: TextStyle(fontSize: 11, color: Colors.red.withAlpha(180))),
               ]),
             )),
           ]),

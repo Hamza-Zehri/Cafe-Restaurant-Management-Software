@@ -2,6 +2,7 @@
 // APP STATE — All Riverpod providers
 // ═══════════════════════════════════════════════════════
 
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -699,28 +700,53 @@ final posProvider = StateNotifierProvider.family<POSNotifier, AsyncValue<OrderEn
 
 // ── Kitchen state ─────────────────────────────────────
 class KitchenState {
-  const KitchenState({this.active = const [], this.done = const []});
-  final List<OrderEntity> active; // orders in the kitchen (not yet paid)
-  final List<OrderEntity> done;   // orders whose bill was paid today
+  const KitchenState({this.active = const [], this.done = const [], this.cancelled = const []});
+  final List<OrderEntity> active;
+  final List<OrderEntity> done;
+  final List<OrderEntity> cancelled;
+  KitchenState copyWith({List<OrderEntity>? active, List<OrderEntity>? done, List<OrderEntity>? cancelled}) =>
+    KitchenState(active: active ?? this.active, done: done ?? this.done, cancelled: cancelled ?? this.cancelled);
 }
 
 class KitchenNotifier extends StateNotifier<KitchenState> {
-  KitchenNotifier(this._db) : super(const KitchenState()) { _load(); }
+  KitchenNotifier(this._db) : super(const KitchenState()) { _subscribe(); }
   final AppDatabase _db;
+  StreamSubscription? _sub;
+  final _subs = <StreamSubscription>[];
 
-  Future<void> _load() async {
-    final rows = await _db.orderDao.kitchenPending();
-    final active = await Future.wait(rows.map((r) => _buildOrder(_db, r)));
-    // Done orders reset per register session: only orders paid since the
-    // currently open register was opened (starts from zero on new register).
-    final reg = await _db.registerDao.openRegister();
-    final since = reg?.openedAt ?? DateTime.now().subtract(const Duration(days: 1));
-    final doneRows = await _db.orderDao.doneToday(since);
-    final done = await Future.wait(doneRows.map((r) => _buildOrder(_db, r)));
-    state = KitchenState(active: active, done: done);
+  void _subscribe() {
+    _sub?.cancel();
+    for (final s in _subs) { s.cancel(); }
+    _subs.clear();
+
+    _sub = _db.registerDao.watchOpenRegister().listen((reg) {
+      for (final s in _subs) { s.cancel(); }
+      _subs.clear();
+      final since = reg?.openedAt ?? DateTime.now().subtract(const Duration(days: 1));
+
+      _subs.add(_db.orderDao.watchKitchenPending().listen((rows) async {
+        final orders = await Future.wait(rows.map((r) => _buildOrder(_db, r)));
+        if (mounted) state = state.copyWith(active: orders);
+      }));
+      _subs.add(_db.orderDao.watchDoneToday(since).listen((rows) async {
+        final orders = await Future.wait(rows.map((r) => _buildOrder(_db, r)));
+        if (mounted) state = state.copyWith(done: orders);
+      }));
+      _subs.add(_db.orderDao.watchCancelledToday(since).listen((rows) async {
+        final orders = await Future.wait(rows.map((r) => _buildOrder(_db, r)));
+        if (mounted) state = state.copyWith(cancelled: orders);
+      }));
+    });
   }
 
-  void refresh() => _load();
+  void refresh() => _subscribe();
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    for (final s in _subs) { s.cancel(); }
+    super.dispose();
+  }
 }
 
 final kitchenProvider = StateNotifierProvider<KitchenNotifier, KitchenState>(
