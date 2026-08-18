@@ -700,12 +700,12 @@ final posProvider = StateNotifierProvider.family<POSNotifier, AsyncValue<OrderEn
 
 // ── Kitchen state ─────────────────────────────────────
 class KitchenState {
-  const KitchenState({this.active = const [], this.done = const [], this.cancelled = const []});
+  const KitchenState({this.active = const [], this.done = const [], this.cancelledItems = const []});
   final List<OrderEntity> active;
   final List<OrderEntity> done;
-  final List<OrderEntity> cancelled;
-  KitchenState copyWith({List<OrderEntity>? active, List<OrderEntity>? done, List<OrderEntity>? cancelled}) =>
-    KitchenState(active: active ?? this.active, done: done ?? this.done, cancelled: cancelled ?? this.cancelled);
+  final List<VoidedKitchenItem> cancelledItems;
+  KitchenState copyWith({List<OrderEntity>? active, List<OrderEntity>? done, List<VoidedKitchenItem>? cancelledItems}) =>
+    KitchenState(active: active ?? this.active, done: done ?? this.done, cancelledItems: cancelledItems ?? this.cancelledItems);
 }
 
 class KitchenNotifier extends StateNotifier<KitchenState> {
@@ -732,9 +732,8 @@ class KitchenNotifier extends StateNotifier<KitchenState> {
         final orders = await Future.wait(rows.map((r) => _buildOrder(_db, r)));
         if (mounted) state = state.copyWith(done: orders);
       }));
-      _subs.add(_db.orderDao.watchCancelledToday(since).listen((rows) async {
-        final orders = await Future.wait(rows.map((r) => _buildOrder(_db, r)));
-        if (mounted) state = state.copyWith(cancelled: orders);
+      _subs.add(_db.orderDao.watchVoidedKitchenItems(since).listen((items) {
+        if (mounted) state = state.copyWith(cancelledItems: items);
       }));
     });
   }

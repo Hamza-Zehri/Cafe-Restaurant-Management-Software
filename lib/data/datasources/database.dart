@@ -12,6 +12,22 @@ import 'package:crypto/crypto.dart';
 
 part 'database.g.dart';
 
+class VoidedKitchenItem {
+  final String itemName;
+  final int quantity;
+  final String orderNumber;
+  final String tableName;
+  final int ticketNumber;
+  final String waiterName;
+  final DateTime sentAt;
+  const VoidedKitchenItem({
+    required this.itemName, required this.quantity,
+    required this.orderNumber, required this.tableName,
+    required this.ticketNumber, required this.waiterName,
+    required this.sentAt,
+  });
+}
+
 // Typedef aliases to bridge generated Drift class names with codebase references
 typedef UserRow = User;
 typedef FloorRow = Floor;
@@ -456,6 +472,25 @@ class OrderDao extends DatabaseAccessor<AppDatabase> with _$OrderDaoMixin {
     (select(orders)
       ..where((o) => o.status.equals('cancelled') & o.createdAt.isBiggerThanValue(since) & o.kitchenTicketCount.isBiggerOrEqualValue(1))
       ..orderBy([(o) => OrderingTerm.desc(o.createdAt)])).watch();
+  // Voided kitchen items: individual items voided from POS after kitchen ticket sent
+  Stream<List<VoidedKitchenItem>> watchVoidedKitchenItems(DateTime since) {
+    final q = select(orderItems).join([
+      innerJoin(orders, orders.id.equalsExp(orderItems.orderId)),
+    ])
+      ..where(orderItems.isVoided.equals(true) & orderItems.sentToKitchenAt.isNotNull()
+          & orders.createdAt.isBiggerThanValue(since))
+      ..orderBy([OrderingTerm.desc(orderItems.sentToKitchenAt)]);
+    return q.watch().map((rows) => rows.map((r) {
+      final item = r.readTable(orderItems);
+      final order = r.readTable(orders);
+      return VoidedKitchenItem(
+        itemName: item.menuItemName, quantity: item.quantity,
+        orderNumber: order.orderNumber, tableName: order.tableNameCol,
+        ticketNumber: order.kitchenTicketCount, waiterName: order.waiterName,
+        sentAt: item.sentToKitchenAt!,
+      );
+    }).toList());
+  }
 }
 
 @DriftAccessor(tables: [Invoices])
