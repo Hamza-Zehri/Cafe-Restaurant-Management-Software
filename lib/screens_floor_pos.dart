@@ -555,15 +555,27 @@ class _TableWidgetState extends ConsumerState<_TableWidget> with SingleTickerPro
                 Container(width: 7, height: 7, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
             ]),
             if (widget.editMode)
-              Positioned(top: 3, right: 3, child: GestureDetector(
-                onTap: () => _deleteTable(ref, t),
-                child: Container(
-                  width: 19, height: 19,
-                  decoration: BoxDecoration(color: Colors.red.shade600, shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 1.5)),
-                  child: const Icon(Icons.close, size: 12, color: Colors.white),
+              Positioned(top: 3, right: 3, child: Row(mainAxisSize: MainAxisSize.min, children: [
+                GestureDetector(
+                  onTap: () => _editTable(ref, t),
+                  child: Container(
+                    width: 19, height: 19,
+                    decoration: BoxDecoration(color: Colors.blue.shade600, shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 1.5)),
+                    child: const Icon(Icons.edit, size: 11, color: Colors.white),
+                  ),
                 ),
-              )),
+                const SizedBox(width: 4),
+                GestureDetector(
+                  onTap: () => _deleteTable(ref, t),
+                  child: Container(
+                    width: 19, height: 19,
+                    decoration: BoxDecoration(color: Colors.red.shade600, shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 1.5)),
+                    child: const Icon(Icons.close, size: 12, color: Colors.white),
+                  ),
+                ),
+              ])),
           ]),
         ),
       ),
@@ -594,6 +606,43 @@ class _TableWidgetState extends ConsumerState<_TableWidget> with SingleTickerPro
     ));
     if (ok != true) return;
     await (db.delete(db.restaurantTables)..where((x) => x.id.equals(table.id))).go();
+  }
+
+  Future<void> _editTable(WidgetRef ref, TableEntity table) async {
+    final nameCtrl = TextEditingController(text: table.name);
+    final capCtrl = TextEditingController(text: '${table.capacity}');
+    final db = ref.read(dbProvider);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Edit Table'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(
+            controller: nameCtrl,
+            decoration: const InputDecoration(labelText: 'Table name', border: OutlineInputBorder()),
+            autofocus: true,
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: capCtrl,
+            decoration: const InputDecoration(labelText: 'Capacity', border: OutlineInputBorder()),
+            keyboardType: TextInputType.number,
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final newName = nameCtrl.text.trim();
+    final newCap = int.tryParse(capCtrl.text.trim()) ?? table.capacity;
+    if (newName.isEmpty) {
+      showError(context, 'Table name cannot be empty');
+      return;
+    }
+    await db.tableDao.updateTable(table.id, name: newName, capacity: newCap);
   }
 }
 
@@ -1604,12 +1653,11 @@ class _CartItemRow extends StatelessWidget {
             child: Text(_statusLabel(item.status), style: TextStyle(fontSize: 10, color: statusColor, fontWeight: FontWeight.w500)),
           ),
           const Spacer(),
-          // Void (only if pending)
-          if (!sentToKitchen)
-            GestureDetector(
-              onTap: onVoid,
-              child: Icon(Icons.delete_outline_rounded, size: 18, color: context.cs.error),
-            ),
+          // Void (always visible — voids item even after kitchen ticket)
+          GestureDetector(
+            onTap: onVoid,
+            child: Icon(Icons.delete_outline_rounded, size: 18, color: context.cs.error),
+          ),
           const SizedBox(width: 8),
           // Qty controls
           _RoundBtn(icon: Icons.remove, onTap: !sentToKitchen ? onDecrement : null),

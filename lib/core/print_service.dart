@@ -45,6 +45,7 @@ class ReportData {
   final int totalItemsSold;
   final int voidedOrders;
   final List<String> cancelledOrderNumbers;
+  final List<CancelledItemEntry> cancelledItems;
   final int kitchenGenerated;
   final int kitchenCompleted;
   final int voidedKitchen;
@@ -56,6 +57,7 @@ class ReportData {
     this.totalItemsSold = 0,
     this.voidedOrders = 0,
     this.cancelledOrderNumbers = const [],
+    this.cancelledItems = const [],
     this.kitchenGenerated = 0,
     this.kitchenCompleted = 0,
     this.voidedKitchen = 0,
@@ -63,6 +65,14 @@ class ReportData {
     this.itemSales = const [],
     this.kitchenItems = const [],
   });
+}
+
+class CancelledItemEntry {
+  final String orderNumber;
+  final int ticketNumber;
+  final String itemName;
+  final int quantity;
+  const CancelledItemEntry(this.orderNumber, this.ticketNumber, this.itemName, this.quantity);
 }
 
 class PrintService {
@@ -193,11 +203,16 @@ class PrintService {
     final soldQty = <String, int>{};
     final soldAmount = <String, double>{};
     final soldOrders = <String, Set<int>>{};
+    final cancelledItems = <CancelledItemEntry>[];
     var totalItems = 0;
     for (final order in orders) {
       final items = await db.orderDao.itemsForOrder(order.id);
       for (final it in items) {
-        if (it.isVoided) continue;
+        if (it.isVoided) {
+          cancelledItems.add(CancelledItemEntry(
+            order.orderNumber, order.kitchenTicketCount, it.menuItemName, it.quantity));
+          continue;
+        }
         soldQty[it.menuItemName] = (soldQty[it.menuItemName] ?? 0) + it.quantity;
         soldAmount[it.menuItemName] = (soldAmount[it.menuItemName] ?? 0) + (it.unitPrice * it.quantity);
         (soldOrders[it.menuItemName] ??= <int>{}).add(order.id);
@@ -237,6 +252,7 @@ class PrintService {
       totalItemsSold: totalItems,
       voidedOrders: orders.where((o) => o.status == 'cancelled').length,
       cancelledOrderNumbers: orders.where((o) => o.status == 'cancelled').map((o) => o.orderNumber).toList(),
+      cancelledItems: cancelledItems,
       kitchenGenerated: kitchenGenerated,
       kitchenCompleted: kitchenCompleted,
       voidedKitchen: voidedKitchen,
@@ -678,7 +694,18 @@ class PrintService {
         t.section('KITCHEN', font: thermalBold),
         t.row('Tickets printed', '${reg.totalKitchenTickets}', size: 9, font: thermalRegular),
         t.row('Void transactions', '${data.cancelledOrderNumbers.length}', size: 9, font: thermalRegular),
-        if (data.cancelledOrderNumbers.isNotEmpty) ...[
+        if (data.cancelledItems.isNotEmpty) ...[
+          pw.SizedBox(height: 4),
+          t.section('CANCELLED ITEMS', font: thermalBold),
+          ...data.cancelledItems.map((c) => pw.Padding(
+            padding: const pw.EdgeInsets.only(bottom: 2),
+            child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+              t.row('  ${c.quantity}x ${c.itemName}', '', size: 9, font: thermalRegular),
+              t.sub('    Order #${c.orderNumber}  Ticket #${c.ticketNumber}', size: 8, font: thermalRegular),
+            ]),
+          )),
+        ],
+        if (data.cancelledOrderNumbers.isNotEmpty && data.cancelledItems.isEmpty) ...[
           pw.SizedBox(height: 4),
           t.section('CANCELLED ORDERS', font: thermalBold),
           ...data.cancelledOrderNumbers.map((n) => t.row('  #$n', '', size: 9, font: thermalRegular)),

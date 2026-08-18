@@ -278,7 +278,9 @@ class _KitchenTableCardState extends State<_KitchenTableCard> {
     final urgent = _elapsed.inMinutes >= 20;
     final color = urgent ? Colors.red : AppColors.orderKitchen;
 
-    return AnimatedContainer(
+    return GestureDetector(
+      onTap: () => _showOrderDetail(context, o),
+      child: AnimatedContainer(
       duration: const Duration(milliseconds: 400),
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
@@ -396,6 +398,35 @@ class _KitchenTableCardState extends State<_KitchenTableCard> {
                         ])),
                   ]),
                 )),
+            // Voided items (cancelled from POS)
+            ...o.items.where((i) => i.isVoided).map((item) => Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Container(
+                      width: 28, height: 28,
+                      decoration: BoxDecoration(
+                        color: Colors.red.withAlpha(18),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.red.withAlpha(60)),
+                      ),
+                      child: const Center(
+                          child: Icon(Icons.cancel_outlined, size: 14, color: Colors.red)),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                          Text('${item.quantity}x ${item.menuItem.name}',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w700, fontSize: 13,
+                                  decoration: TextDecoration.lineThrough,
+                                  color: Colors.red)),
+                          const Text('Cancelled',
+                              style: TextStyle(fontSize: 10, color: Colors.red, fontWeight: FontWeight.w600)),
+                        ])),
+                  ]),
+                )),
           ]),
         ),
         // Order note
@@ -420,6 +451,80 @@ class _KitchenTableCardState extends State<_KitchenTableCard> {
           ),
         const SizedBox(height: 10),
       ]),
+    ),
+    );
+  }
+
+  void _showOrderDetail(BuildContext context, OrderEntity o) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final color = AppColors.orderKitchen;
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Row(children: [
+          Icon(Icons.table_restaurant_rounded, color: color, size: 20),
+          const SizedBox(width: 8),
+          Text(o.tableName, style: TextStyle(fontWeight: FontWeight.w800, color: color)),
+          const SizedBox(width: 8),
+          Text('#${o.orderNumber}', style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+        ]),
+        content: SizedBox(
+          width: 380,
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Icon(Icons.person_outline, size: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              const SizedBox(width: 4),
+              Text(o.waiterName, style: const TextStyle(fontSize: 12)),
+              const SizedBox(width: 12),
+              Icon(Icons.group_outlined, size: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              const SizedBox(width: 4),
+              Text('${o.guestCount} guests', style: const TextStyle(fontSize: 12)),
+              const Spacer(),
+              Text(_timeStr, style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w700)),
+            ]),
+            const SizedBox(height: 12),
+            ...o.items.where((i) => !i.isVoided).map((item) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(children: [
+                Container(
+                  width: 24, height: 24,
+                  decoration: BoxDecoration(
+                    color: color.withAlpha(25),
+                    borderRadius: BorderRadius.circular(5),
+                    border: Border.all(color: color.withAlpha(60)),
+                  ),
+                  child: Center(child: Text('×${item.quantity}',
+                      style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 11))),
+                ),
+                const SizedBox(width: 8),
+                Expanded(child: Text(item.menuItem.name, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
+                if (item.notes.isNotEmpty)
+                  Icon(Icons.sticky_note_2_outlined, size: 12, color: Colors.orange),
+              ]),
+            )),
+            if (o.items.any((i) => i.isVoided)) ...[
+              const SizedBox(height: 8),
+              const Divider(height: 1),
+              const SizedBox(height: 8),
+              Text('Cancelled Items', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.red)),
+              const SizedBox(height: 4),
+              ...o.items.where((i) => i.isVoided).map((item) => Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(children: [
+                  const Icon(Icons.cancel_outlined, size: 14, color: Colors.red),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text('${item.quantity}x ${item.menuItem.name}',
+                      style: const TextStyle(fontSize: 12, color: Colors.red, decoration: TextDecoration.lineThrough))),
+                ]),
+              )),
+            ],
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        ],
+      ),
     );
   }
 }
@@ -432,7 +537,9 @@ class _DoneTableCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDark;
-    return Container(
+    return GestureDetector(
+      onTap: () => _showDoneOrderDetail(context, order),
+      child: Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: isDark ? AppColors.darkCard : Colors.white,
@@ -468,7 +575,70 @@ class _DoneTableCard extends StatelessWidget {
           const Spacer(),
           Text('${order.items.length} items',
               style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+          const SizedBox(width: 6),
+          Icon(Icons.chevron_right_rounded, size: 18, color: context.cs.onSurfaceVariant),
         ]),
+      ),
+    ),
+    );
+  }
+
+  void _showDoneOrderDetail(BuildContext context, OrderEntity o) {
+    final color = AppColors.success;
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Row(children: [
+          Icon(Icons.check_circle_rounded, color: color, size: 20),
+          const SizedBox(width: 8),
+          Text(o.tableName, style: TextStyle(fontWeight: FontWeight.w800, color: color)),
+          const SizedBox(width: 8),
+          Text('#${o.orderNumber}', style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+        ]),
+        content: SizedBox(
+          width: 380,
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Icon(Icons.person_outline, size: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              const SizedBox(width: 4),
+              Text(o.waiterName, style: const TextStyle(fontSize: 12)),
+              const SizedBox(width: 12),
+              Icon(Icons.group_outlined, size: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              const SizedBox(width: 4),
+              Text('${o.guestCount} guests', style: const TextStyle(fontSize: 12)),
+            ]),
+            const SizedBox(height: 12),
+            ...o.items.map((item) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(children: [
+                Container(
+                  width: 24, height: 24,
+                  decoration: BoxDecoration(
+                    color: (item.isVoided ? Colors.red : color).withAlpha(25),
+                    borderRadius: BorderRadius.circular(5),
+                    border: Border.all(color: (item.isVoided ? Colors.red : color).withAlpha(60)),
+                  ),
+                  child: item.isVoided
+                    ? const Center(child: Icon(Icons.cancel_outlined, size: 12, color: Colors.red))
+                    : Center(child: Text('×${item.quantity}',
+                        style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 11))),
+                ),
+                const SizedBox(width: 8),
+                Expanded(child: Text(item.menuItem.name,
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+                      decoration: item.isVoided ? TextDecoration.lineThrough : null,
+                      color: item.isVoided ? Colors.red : null))),
+                Text(item.isVoided ? 'voided' : '×${item.quantity}',
+                    style: TextStyle(fontSize: 11,
+                      color: item.isVoided ? Colors.red : Theme.of(context).colorScheme.onSurfaceVariant)),
+              ]),
+            )),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        ],
       ),
     );
   }

@@ -371,6 +371,11 @@ class TableDao extends DatabaseAccessor<AppDatabase> with _$TableDaoMixin {
     (update(restaurantTables)..where((t) => t.id.equals(id))).write(RestaurantTablesCompanion(width: Value(w), height: Value(h)));
   Future<void> updateRunningTotal(int id, double total) =>
     (update(restaurantTables)..where((t) => t.id.equals(id))).write(RestaurantTablesCompanion(runningTotal: Value(total)));
+  Future<void> updateTable(int id, {String? name, int? capacity}) =>
+    (update(restaurantTables)..where((t) => t.id.equals(id))).write(RestaurantTablesCompanion(
+      name: name != null ? Value(name) : const Value.absent(),
+      capacity: capacity != null ? Value(capacity) : const Value.absent(),
+    ));
 }
 
 @DriftAccessor(tables: [MenuGroups, MenuItems])
