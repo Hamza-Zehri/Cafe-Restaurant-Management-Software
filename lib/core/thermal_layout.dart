@@ -185,18 +185,18 @@ class ThermalLayout {
     return _twoCol(label, value, font, vf, size);
   }
 
-  // ── Item row: auto-shrinks amount if name is long ──
-  // Tries [size] first; if label+amount overflows, reduces value
-  // font in 0.5pt steps down to 7pt so the amount always fits.
+  // ── Item row: dot-leader or stacked ─────────────────
+  // Short names: "Biryani x1..........Rs 450" (single line)
+  // Long names:  "Mutton White Karahi (Half) x2" then "Rs 1200" below
   pw.Widget item(String name, String value,
       {double size = 9, required pw.Font font, pw.Font? valueFont}) {
     final vf = valueFont ?? font;
+    final labelW = measure(name, size);
+    final valueW = measure(value, size);
     final spaceW = measure(' ', size);
     final safetyDots = 4;
     final dotW = measure('.', size);
-    // Try current size first
-    final labelW = measure(name, size);
-    final valueW = measure(value, size);
+    // Try single line with dot-leader
     final avail = contentWidth - labelW - valueW - spaceW * 2;
     if (avail >= dotW * safetyDots && labelW <= contentWidth * 0.55) {
       final dots = ((avail / dotW).floor() - safetyDots).clamp(1, 40);
@@ -207,23 +207,24 @@ class ThermalLayout {
             maxLines: 1, overflow: pw.TextOverflow.clip),
       );
     }
-    // Name is long — shrink the amount font to fit
-    for (double vs = size; vs >= 7; vs -= 0.5) {
-      final vw = measure(value, vs);
-      final sw = measure(' ', vs);
-      final a = contentWidth - labelW - vw - sw * 2;
-      if (a >= dotW * safetyDots) {
-        final dots = ((a / dotW).floor() - safetyDots).clamp(1, 40);
-        return pw.SizedBox(
-          width: contentWidth,
-          child: pw.Text('$name ${'.' * dots} $value',
-              style: pw.TextStyle(font: font, fontSize: size),
-              maxLines: 1, overflow: pw.TextOverflow.clip),
-        );
-      }
-    }
-    // Still doesn't fit — use two-column fallback
-    return _twoCol(name, value, font, vf, size);
+    // Name is long — amount on its own line below
+    return pw.SizedBox(
+      width: contentWidth,
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(name,
+              maxLines: 1, overflow: pw.TextOverflow.clip,
+              style: pw.TextStyle(font: font, fontSize: size)),
+          pw.SizedBox(
+            width: contentWidth,
+            child: pw.Text(value,
+                textAlign: pw.TextAlign.right,
+                style: pw.TextStyle(font: vf, fontSize: size)),
+          ),
+        ],
+      ),
+    );
   }
 
   // ── Two-column label / right-aligned value ──────────

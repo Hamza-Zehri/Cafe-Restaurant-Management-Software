@@ -2993,6 +2993,141 @@ class _BackupSettings extends ConsumerWidget {
         ),
         const SizedBox(height: 24),
 
+        // ── Menu Import / Export ─────────────────────────
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Export Menu Card
+            Expanded(
+              child: AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.restaurant_menu, color: context.cs.primary, size: 24),
+                        const SizedBox(width: 10),
+                        const Text('Export Menu', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Export complete menu including categories, items (with photos), and deals as a ZIP file.',
+                      style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 13, height: 1.4),
+                    ),
+                    const SizedBox(height: 24),
+                    FilledButton.icon(
+                      icon: const Icon(Icons.download_rounded, size: 16),
+                      label: const Text('Export Menu'),
+                      onPressed: () async {
+                        try {
+                          final ts = DateFormat('yyyy-MM-dd_HH-mm-ss').format(DateTime.now());
+                          final defaultFileName = 'menu_export_$ts.zip';
+                          final destPath = await FilePicker.platform.saveFile(
+                            dialogTitle: 'Save Menu Archive',
+                            fileName: defaultFileName,
+                            type: FileType.custom,
+                            allowedExtensions: ['zip'],
+                          );
+                          if (destPath == null) return;
+
+                          if (context.mounted) {
+                            showDialog(context: context, barrierDismissible: false,
+                              builder: (_) => const Center(child: Card(child: Padding(padding: EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [CircularProgressIndicator(), SizedBox(height: 16), Text('Exporting menu...')])))));
+                          }
+
+                          final db = ref.read(dbProvider);
+                          await MenuExportService.exportMenu(destPath, db);
+
+                          if (context.mounted) {
+                            Navigator.of(context).pop();
+                            showSuccess(context, 'Menu exported successfully!');
+                          }
+                        } catch (e) {
+                          if (context.mounted) {
+                            if (Navigator.canPop(context)) Navigator.of(context).pop();
+                            showError(context, 'Export failed: $e');
+                          }
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 20),
+            // Import Menu Card
+            Expanded(
+              child: AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.upload_rounded, color: Colors.orange, size: 24),
+                        const SizedBox(width: 10),
+                        const Text('Import Menu', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Import a menu from a previously exported ZIP file. Existing items are kept — duplicates are skipped.',
+                      style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 13, height: 1.4),
+                    ),
+                    const SizedBox(height: 24),
+                    FilledButton.icon(
+                      icon: const Icon(Icons.upload_file_rounded, size: 16),
+                      label: const Text('Import Menu'),
+                      style: FilledButton.styleFrom(backgroundColor: Colors.orange),
+                      onPressed: () async {
+                        final files = await FilePicker.platform.pickFiles(
+                          dialogTitle: 'Select Menu Archive',
+                          type: FileType.custom,
+                          allowedExtensions: ['zip'],
+                        );
+                        if (files == null || files.files.isEmpty) return;
+                        final zipPath = files.files.first.path;
+                        if (zipPath == null) return;
+
+                        final confirm = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
+                          title: const Text('Import Menu?'),
+                          content: const Text('This will add categories, items and deals from the archive. Duplicates will be skipped. Continue?'),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+                            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Import')),
+                          ],
+                        ));
+                        if (confirm != true) return;
+
+                        try {
+                          if (context.mounted) {
+                            showDialog(context: context, barrierDismissible: false,
+                              builder: (_) => const Center(child: Card(child: Padding(padding: EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [CircularProgressIndicator(), SizedBox(height: 16), Text('Importing menu...')])))));
+                          }
+
+                          final db = ref.read(dbProvider);
+                          final result = await MenuExportService.importMenu(zipPath, db);
+
+                          if (context.mounted) {
+                            Navigator.of(context).pop();
+                            showSuccess(context, 'Import complete!\n$result');
+                          }
+                        } catch (e) {
+                          if (context.mounted) {
+                            if (Navigator.canPop(context)) Navigator.of(context).pop();
+                            showError(context, 'Import failed: $e');
+                          }
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+
         // ── Auto Backup Settings ──────────────────────────
         AppCard(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

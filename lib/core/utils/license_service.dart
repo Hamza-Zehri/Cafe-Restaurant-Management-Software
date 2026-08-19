@@ -39,9 +39,6 @@ class LicenseService {
 
   static Future<String> getMachineId() async {
     // IMPORTANT: only stable hardware / OS-install identifiers are used.
-    // Hostname, COMPUTERNAME, USERNAME and attached-disk serials are excluded
-    // because they change when the PC is renamed, a different user logs in, or
-    // a USB drive is plugged in — which previously invalidated activations.
     final parts = <String>[
       await _run('wmic', ['csproduct', 'get', 'UUID']),
       await _run('wmic', ['bios', 'get', 'serialnumber']),
