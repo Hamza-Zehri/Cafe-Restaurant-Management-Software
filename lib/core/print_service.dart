@@ -116,9 +116,23 @@ class PrintService {
       if (printer == null || !printer.isAvailable) {
         throw const PrintException('Thermal printer is not connected.');
       }
+      // Build the format for the printer driver. We explicitly set the
+      // margins to our safe margins (2mm left, 5mm right) so the driver
+      // knows the content area. The right margin is intentionally larger
+      // because thermal printers have a wider unprintable zone on the
+      // right edge. The height is set to A4 for the driver's page
+      // setup — thermal printers ignore height for roll paper.
+      final thermalFormat = PdfPageFormat(
+        fixedFormat.width,
+        PdfPageFormat.a4.height,
+        marginLeft: fixedFormat.marginLeft,
+        marginTop: fixedFormat.marginTop,
+        marginRight: fixedFormat.marginRight,
+        marginBottom: fixedFormat.marginBottom,
+      );
       await Printing.directPrintPdf(
         printer: printer,
-        format: fixedFormat.copyWith(height: PdfPageFormat.a4.height),
+        format: thermalFormat,
         onLayout: (_) => build(fixedFormat),
         name: name,
       );
@@ -173,7 +187,8 @@ class PrintService {
 
   // ── Layout helper ──────────────────────────────────
   // Always 80mm thermal — identical layout for PDF and thermal print.
-  static final _fixedLayout = ThermalLayout(paperWidthMm: 80, marginMm: 2);
+  // 3mm margin on each side keeps content in the safe printable zone.
+  static final _fixedLayout = ThermalLayout(paperWidthMm: 80);
 
   ThermalLayout _layout({PdfPageFormat? format}) {
     if (format != null) return ThermalLayout.fromFormat(format);
@@ -385,7 +400,7 @@ class PrintService {
           t.dashedLine(),
           pw.SizedBox(height: 3),
           t.row('Date', _df.format(DateTime.now()), size: 8.5, font: thermalRegular),
-          t.row('Table', order.tableName, size: 8.5, font: thermalBold),
+          t.row(order.isDelivery ? 'Rider' : 'Table', order.tableName, size: 8.5, font: thermalBold),
           t.row('Order #', order.orderNumber, size: 8.5, font: thermalRegular),
           t.row('Waiter', order.waiterName, size: 8.5, font: thermalBold),
           pw.SizedBox(height: 3),
@@ -421,6 +436,8 @@ class PrintService {
             t.row('SERVICE CHARGE', '${_settings.currencySymbol} ${order.serviceChargeFixed.toStringAsFixed(0)}', size: 9, font: thermalRegular),
           if (order.serviceChargePercentValue > 0)
             t.row('SERVICE (${order.serviceChargePercent.toStringAsFixed(0)}%)', '${_settings.currencySymbol} ${order.serviceChargePercentValue.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+          if (order.deliveryCharges > 0)
+            t.row('DELIVERY CHARGES', '${_settings.currencySymbol} ${order.deliveryCharges.toStringAsFixed(0)}', size: 9, font: thermalRegular),
           pw.SizedBox(height: 3),
           t.dashedLine(h: 1.4),
           pw.SizedBox(height: 3),
@@ -468,7 +485,7 @@ class PrintService {
           pw.SizedBox(height: 3),
           t.row('Invoice', inv.invoiceNumber, size: 8.5, font: thermalRegular),
           t.row('Date', _df.format(inv.createdAt), size: 8.5, font: thermalRegular),
-          t.row('Table', inv.tableName, size: 8.5, font: thermalBold),
+          t.row(inv.orderType == 'delivery' ? 'Rider' : 'Table', inv.tableName, size: 8.5, font: thermalBold),
           t.row('Order #', inv.orderNumber, size: 8.5, font: thermalRegular),
           t.row('Waiter', inv.waiterName, size: 8.5, font: thermalBold),
           pw.SizedBox(height: 3),
@@ -502,6 +519,8 @@ class PrintService {
             t.row('TAX (${_settings.taxPercent.toStringAsFixed(0)}%)', '${_settings.currencySymbol} ${inv.taxValue.toStringAsFixed(0)}', size: 9, font: thermalRegular),
           if (inv.serviceChargeValue > 0)
             t.row('SERVICE CHARGE', '${_settings.currencySymbol} ${inv.serviceChargeValue.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+          if (inv.deliveryCharges > 0)
+            t.row('DELIVERY CHARGES', '${_settings.currencySymbol} ${inv.deliveryCharges.toStringAsFixed(0)}', size: 9, font: thermalRegular),
           pw.SizedBox(height: 3),
           t.dashedLine(h: 1.4),
           pw.SizedBox(height: 3),
@@ -584,7 +603,7 @@ class PrintService {
               pw.SizedBox(height: 6),
               pw.Text('Invoice: ${inv.invoiceNumber}', style: pw.TextStyle(font: font, fontSize: 11)),
               pw.Text('Date: ${_df.format(inv.createdAt)}', style: pw.TextStyle(font: fontReg, fontSize: 10)),
-              pw.Text('Table: ${inv.tableName}', style: pw.TextStyle(font: fontReg, fontSize: 10)),
+              pw.Text('${inv.orderType == 'delivery' ? 'Rider' : 'Table'}: ${inv.tableName}', style: pw.TextStyle(font: fontReg, fontSize: 10)),
               pw.Text('Waiter: ${inv.waiterName}', style: pw.TextStyle(font: fontReg, fontSize: 10)),
             ]),
           ]),
@@ -630,6 +649,7 @@ class PrintService {
               if (inv.discountValue > 0) _a4TotalRow('Discount', -inv.discountValue, font, fontReg),
               if (inv.taxValue > 0) _a4TotalRow('GST (${_settings.taxPercent.toStringAsFixed(0)}%)', inv.taxValue, font, fontReg),
               if (inv.serviceChargeValue > 0) _a4TotalRow('Service Charge', inv.serviceChargeValue, font, fontReg),
+              if (inv.deliveryCharges > 0) _a4TotalRow('Delivery Charges', inv.deliveryCharges, font, fontReg),
               pw.Divider(thickness: 1),
               pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
                 pw.Text('GRAND TOTAL', style: pw.TextStyle(font: font, fontSize: 13)),

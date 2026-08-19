@@ -392,18 +392,37 @@ class AmtText extends ConsumerWidget {
   }
 }
 
-// ── Snack helpers ─────────────────────────────────────
-void showSuccess(BuildContext ctx, String msg) =>
-  ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
-    content: Row(children: [const Icon(Icons.check_circle, color: Colors.white, size: 18), const SizedBox(width: 8), Text(msg)]),
-    backgroundColor: AppColors.success, duration: const Duration(seconds: 3),
+// ── Top notification overlay (compact, non-intrusive) ──
+void _showNotif(BuildContext ctx, String msg, Color bg, IconData icon) {
+  final overlay = Overlay.of(ctx);
+  late OverlayEntry entry;
+  entry = OverlayEntry(builder: (_) => Positioned(
+    top: 12, left: 40, right: 40,
+    child: Material(
+      color: Colors.transparent,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: bg, borderRadius: BorderRadius.circular(8),
+          boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 6, offset: const Offset(0, 2))],
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, color: Colors.white, size: 15),
+          const SizedBox(width: 6),
+          Flexible(child: Text(msg, style: const TextStyle(color: Colors.white, fontSize: 12))),
+        ]),
+      ),
+    ),
   ));
+  overlay.insert(entry);
+  Future.delayed(const Duration(seconds: 2), () { entry.remove(); });
+}
+
+void showSuccess(BuildContext ctx, String msg) =>
+  _showNotif(ctx, msg, AppColors.success, Icons.check_circle);
 
 void showError(BuildContext ctx, String msg) =>
-  ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
-    content: Row(children: [const Icon(Icons.error_outline, color: Colors.white, size: 18), const SizedBox(width: 8), Expanded(child: Text(msg))]),
-    backgroundColor: AppColors.error, duration: const Duration(seconds: 4),
-  ));
+  _showNotif(ctx, msg, AppColors.error, Icons.error_outline);
 
 // ── Open orders guard ──────────────────────────────────
 // Blocks logout/exit while any order is still open for a table.

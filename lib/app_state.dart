@@ -139,6 +139,7 @@ class SettingsNotifier extends StateNotifier<RestaurantSettings> {
       taxPercent: double.tryParse(s['tax_percent'] ?? '') ?? 17.0,
       serviceChargePercent: double.tryParse(s['service_charge_percent'] ?? '') ?? 0.0,
       serviceChargeFixed: double.tryParse(s['service_charge_fixed'] ?? '') ?? 0.0,
+      defaultDeliveryCharges: double.tryParse(s['default_delivery_charges'] ?? '') ?? 150.0,
       currencySymbol: s['currency_symbol'] ?? 'Rs',
       receiptWidth: int.tryParse(s['receipt_width'] ?? '') ?? 80,
       printerMode: s['printer_mode'] ?? 'pdf',
@@ -165,6 +166,7 @@ class SettingsNotifier extends StateNotifier<RestaurantSettings> {
     await _db.settingsDao.set('tax_percent', s.taxPercent.toString());
     await _db.settingsDao.set('service_charge_percent', s.serviceChargePercent.toString());
     await _db.settingsDao.set('service_charge_fixed', s.serviceChargeFixed.toString());
+    await _db.settingsDao.set('default_delivery_charges', s.defaultDeliveryCharges.toString());
     await _db.settingsDao.set('currency_symbol', s.currencySymbol);
     await _db.settingsDao.set('receipt_width', s.receiptWidth.toString());
     await _db.settingsDao.set('printer_mode', s.printerMode);
@@ -307,7 +309,10 @@ Future<OrderEntity> _buildOrder(AppDatabase db, OrderRow r) async {
     waiterId: r.waiterId, waiterName: r.waiterName, items: items,
     status: _orderStatus(r.status), discountPercent: r.discountPercent,
     discountAmount: r.discountAmount, taxPercent: r.taxPercent,
-    serviceChargePercent: r.serviceChargePercent, serviceChargeFixed: r.serviceChargeFixed, notes: r.notes,
+    serviceChargePercent: r.serviceChargePercent, serviceChargeFixed: r.serviceChargeFixed,
+    deliveryCharges: r.deliveryCharges, orderType: r.orderType,
+    riderId: r.riderId, riderName: r.riderName,
+    notes: r.notes,
     kitchenTicketCount: r.kitchenTicketCount, guestCount: r.guestCount,
     createdAt: r.createdAt, paidAt: r.paidAt,
   );
@@ -339,7 +344,7 @@ class POSNotifier extends StateNotifier<AsyncValue<OrderEntity?>> {
   }
 
   // ── Create new order ─────────────────────────────
-  Future<OrderEntity> _ensureOrder(int guestCount, {String? waiterName}) async {
+  Future<OrderEntity> _ensureOrder(int guestCount, {String? waiterName, String orderType = 'dine_in', int? riderId, String? riderName, double? deliveryCharges}) async {
     if (order != null) return order!;
     final settings = await _db.settingsDao.getAll();
     final now = DateTime.now();
@@ -359,6 +364,10 @@ class POSNotifier extends StateNotifier<AsyncValue<OrderEntity?>> {
       taxPercent: Value(double.tryParse(settings['tax_percent'] ?? '') ?? 17.0),
       serviceChargePercent: Value(double.tryParse(settings['service_charge_percent'] ?? '') ?? 0.0),
       serviceChargeFixed: Value(double.tryParse(settings['service_charge_fixed'] ?? '') ?? 0.0),
+      orderType: Value(orderType),
+      riderId: Value(riderId),
+      riderName: Value(riderName),
+      deliveryCharges: Value(deliveryCharges ?? 0.0),
     ));
 
     await _db.tableDao.setStatus(_tableId, 'occupied',
@@ -368,8 +377,8 @@ class POSNotifier extends StateNotifier<AsyncValue<OrderEntity?>> {
     return order!;
   }
 
-  Future<void> openTableWithWaiter(int guestCount, {String? waiterName}) async {
-    await _ensureOrder(guestCount, waiterName: waiterName);
+  Future<void> openTableWithWaiter(int guestCount, {String? waiterName, String orderType = 'dine_in', int? riderId, String? riderName, double? deliveryCharges}) async {
+    await _ensureOrder(guestCount, waiterName: waiterName, orderType: orderType, riderId: riderId, riderName: riderName, deliveryCharges: deliveryCharges);
   }
 
   // ── Add item to order ─────────────────────────────
@@ -496,6 +505,17 @@ class POSNotifier extends StateNotifier<AsyncValue<OrderEntity?>> {
     await _load();
   }
 
+  // ── Update delivery charges ───────────────────────
+  Future<void> updateDeliveryCharges(double charges) async {
+    final o = order;
+    if (o == null) return;
+    await _db.orderDao.updateOrder(OrdersCompanion(
+      id: Value(o.id),
+      deliveryCharges: Value(charges),
+    ));
+    await _load();
+  }
+
   // ── Hold order ────────────────────────────────────
   Future<void> holdOrder() async {
     final o = order;
@@ -580,6 +600,7 @@ class POSNotifier extends StateNotifier<AsyncValue<OrderEntity?>> {
       tableNameCol: o.tableName, waiterName: o.waiterName,
       subtotal: o.subtotal, discountValue: Value(o.discountValue),
       taxValue: Value(o.taxValue), serviceChargeValue: Value(o.serviceChargeValue),
+      deliveryCharges: Value(o.deliveryCharges),
       grandTotal: o.grandTotal, amountPaid: amountPaid,
       changeAmount: Value(change > 0 ? change : 0),
       paymentMethod: Value(method.name),
@@ -651,7 +672,9 @@ class POSNotifier extends StateNotifier<AsyncValue<OrderEntity?>> {
       id: invId, invoiceNumber: invNum, orderId: o.id, orderNumber: o.orderNumber,
       tableName: o.tableName, waiterName: o.waiterName, items: o.activeItems,
       subtotal: o.subtotal, discountValue: o.discountValue, taxValue: o.taxValue,
-      serviceChargeValue: o.serviceChargeValue, grandTotal: o.grandTotal,
+      serviceChargeValue: o.serviceChargeValue, deliveryCharges: o.deliveryCharges,
+      orderType: o.orderType, riderName: o.riderName,
+      grandTotal: o.grandTotal,
       amountPaid: amountPaid, changeAmount: change > 0 ? change : 0,
       paymentMethod: method, status: BillStatus.final_,
       createdAt: now, customerId: resolvedCustomerId, paymentSplits: splits,

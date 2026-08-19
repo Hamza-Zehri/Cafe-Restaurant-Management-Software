@@ -2622,6 +2622,34 @@ class $OrdersTable extends Orders with TableInfo<$OrdersTable, Order> {
           type: DriftSqlType.double,
           requiredDuringInsert: false,
           defaultValue: const Constant(0.0));
+  static const VerificationMeta _orderTypeMeta =
+      const VerificationMeta('orderType');
+  @override
+  late final GeneratedColumn<String> orderType = GeneratedColumn<String>(
+      'order_type', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant('dine_in'));
+  static const VerificationMeta _riderIdMeta =
+      const VerificationMeta('riderId');
+  @override
+  late final GeneratedColumn<int> riderId = GeneratedColumn<int>(
+      'rider_id', aliasedName, true,
+      type: DriftSqlType.int, requiredDuringInsert: false);
+  static const VerificationMeta _riderNameMeta =
+      const VerificationMeta('riderName');
+  @override
+  late final GeneratedColumn<String> riderName = GeneratedColumn<String>(
+      'rider_name', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _deliveryChargesMeta =
+      const VerificationMeta('deliveryCharges');
+  @override
+  late final GeneratedColumn<double> deliveryCharges = GeneratedColumn<double>(
+      'delivery_charges', aliasedName, false,
+      type: DriftSqlType.double,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(0.0));
   static const VerificationMeta _notesMeta = const VerificationMeta('notes');
   @override
   late final GeneratedColumn<String> notes = GeneratedColumn<String>(
@@ -2672,6 +2700,10 @@ class $OrdersTable extends Orders with TableInfo<$OrdersTable, Order> {
         taxPercent,
         serviceChargePercent,
         serviceChargeFixed,
+        orderType,
+        riderId,
+        riderName,
+        deliveryCharges,
         notes,
         kitchenTicketCount,
         guestCount,
@@ -2761,6 +2793,24 @@ class $OrdersTable extends Orders with TableInfo<$OrdersTable, Order> {
           serviceChargeFixed.isAcceptableOrUnknown(
               data['service_charge_fixed']!, _serviceChargeFixedMeta));
     }
+    if (data.containsKey('order_type')) {
+      context.handle(_orderTypeMeta,
+          orderType.isAcceptableOrUnknown(data['order_type']!, _orderTypeMeta));
+    }
+    if (data.containsKey('rider_id')) {
+      context.handle(_riderIdMeta,
+          riderId.isAcceptableOrUnknown(data['rider_id']!, _riderIdMeta));
+    }
+    if (data.containsKey('rider_name')) {
+      context.handle(_riderNameMeta,
+          riderName.isAcceptableOrUnknown(data['rider_name']!, _riderNameMeta));
+    }
+    if (data.containsKey('delivery_charges')) {
+      context.handle(
+          _deliveryChargesMeta,
+          deliveryCharges.isAcceptableOrUnknown(
+              data['delivery_charges']!, _deliveryChargesMeta));
+    }
     if (data.containsKey('notes')) {
       context.handle(
           _notesMeta, notes.isAcceptableOrUnknown(data['notes']!, _notesMeta));
@@ -2819,6 +2869,14 @@ class $OrdersTable extends Orders with TableInfo<$OrdersTable, Order> {
           data['${effectivePrefix}service_charge_percent'])!,
       serviceChargeFixed: attachedDatabase.typeMapping.read(
           DriftSqlType.double, data['${effectivePrefix}service_charge_fixed'])!,
+      orderType: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}order_type'])!,
+      riderId: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}rider_id']),
+      riderName: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}rider_name']),
+      deliveryCharges: attachedDatabase.typeMapping.read(
+          DriftSqlType.double, data['${effectivePrefix}delivery_charges'])!,
       notes: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}notes'])!,
       kitchenTicketCount: attachedDatabase.typeMapping.read(
@@ -2851,6 +2909,10 @@ class Order extends DataClass implements Insertable<Order> {
   final double taxPercent;
   final double serviceChargePercent;
   final double serviceChargeFixed;
+  final String orderType;
+  final int? riderId;
+  final String? riderName;
+  final double deliveryCharges;
   final String notes;
   final int kitchenTicketCount;
   final int guestCount;
@@ -2869,6 +2931,10 @@ class Order extends DataClass implements Insertable<Order> {
       required this.taxPercent,
       required this.serviceChargePercent,
       required this.serviceChargeFixed,
+      required this.orderType,
+      this.riderId,
+      this.riderName,
+      required this.deliveryCharges,
       required this.notes,
       required this.kitchenTicketCount,
       required this.guestCount,
@@ -2889,6 +2955,14 @@ class Order extends DataClass implements Insertable<Order> {
     map['tax_percent'] = Variable<double>(taxPercent);
     map['service_charge_percent'] = Variable<double>(serviceChargePercent);
     map['service_charge_fixed'] = Variable<double>(serviceChargeFixed);
+    map['order_type'] = Variable<String>(orderType);
+    if (!nullToAbsent || riderId != null) {
+      map['rider_id'] = Variable<int>(riderId);
+    }
+    if (!nullToAbsent || riderName != null) {
+      map['rider_name'] = Variable<String>(riderName);
+    }
+    map['delivery_charges'] = Variable<double>(deliveryCharges);
     map['notes'] = Variable<String>(notes);
     map['kitchen_ticket_count'] = Variable<int>(kitchenTicketCount);
     map['guest_count'] = Variable<int>(guestCount);
@@ -2913,6 +2987,14 @@ class Order extends DataClass implements Insertable<Order> {
       taxPercent: Value(taxPercent),
       serviceChargePercent: Value(serviceChargePercent),
       serviceChargeFixed: Value(serviceChargeFixed),
+      orderType: Value(orderType),
+      riderId: riderId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(riderId),
+      riderName: riderName == null && nullToAbsent
+          ? const Value.absent()
+          : Value(riderName),
+      deliveryCharges: Value(deliveryCharges),
       notes: Value(notes),
       kitchenTicketCount: Value(kitchenTicketCount),
       guestCount: Value(guestCount),
@@ -2940,6 +3022,10 @@ class Order extends DataClass implements Insertable<Order> {
           serializer.fromJson<double>(json['serviceChargePercent']),
       serviceChargeFixed:
           serializer.fromJson<double>(json['serviceChargeFixed']),
+      orderType: serializer.fromJson<String>(json['orderType']),
+      riderId: serializer.fromJson<int?>(json['riderId']),
+      riderName: serializer.fromJson<String?>(json['riderName']),
+      deliveryCharges: serializer.fromJson<double>(json['deliveryCharges']),
       notes: serializer.fromJson<String>(json['notes']),
       kitchenTicketCount: serializer.fromJson<int>(json['kitchenTicketCount']),
       guestCount: serializer.fromJson<int>(json['guestCount']),
@@ -2963,6 +3049,10 @@ class Order extends DataClass implements Insertable<Order> {
       'taxPercent': serializer.toJson<double>(taxPercent),
       'serviceChargePercent': serializer.toJson<double>(serviceChargePercent),
       'serviceChargeFixed': serializer.toJson<double>(serviceChargeFixed),
+      'orderType': serializer.toJson<String>(orderType),
+      'riderId': serializer.toJson<int?>(riderId),
+      'riderName': serializer.toJson<String?>(riderName),
+      'deliveryCharges': serializer.toJson<double>(deliveryCharges),
       'notes': serializer.toJson<String>(notes),
       'kitchenTicketCount': serializer.toJson<int>(kitchenTicketCount),
       'guestCount': serializer.toJson<int>(guestCount),
@@ -2984,6 +3074,10 @@ class Order extends DataClass implements Insertable<Order> {
           double? taxPercent,
           double? serviceChargePercent,
           double? serviceChargeFixed,
+          String? orderType,
+          Value<int?> riderId = const Value.absent(),
+          Value<String?> riderName = const Value.absent(),
+          double? deliveryCharges,
           String? notes,
           int? kitchenTicketCount,
           int? guestCount,
@@ -3002,6 +3096,10 @@ class Order extends DataClass implements Insertable<Order> {
         taxPercent: taxPercent ?? this.taxPercent,
         serviceChargePercent: serviceChargePercent ?? this.serviceChargePercent,
         serviceChargeFixed: serviceChargeFixed ?? this.serviceChargeFixed,
+        orderType: orderType ?? this.orderType,
+        riderId: riderId.present ? riderId.value : this.riderId,
+        riderName: riderName.present ? riderName.value : this.riderName,
+        deliveryCharges: deliveryCharges ?? this.deliveryCharges,
         notes: notes ?? this.notes,
         kitchenTicketCount: kitchenTicketCount ?? this.kitchenTicketCount,
         guestCount: guestCount ?? this.guestCount,
@@ -3035,6 +3133,12 @@ class Order extends DataClass implements Insertable<Order> {
       serviceChargeFixed: data.serviceChargeFixed.present
           ? data.serviceChargeFixed.value
           : this.serviceChargeFixed,
+      orderType: data.orderType.present ? data.orderType.value : this.orderType,
+      riderId: data.riderId.present ? data.riderId.value : this.riderId,
+      riderName: data.riderName.present ? data.riderName.value : this.riderName,
+      deliveryCharges: data.deliveryCharges.present
+          ? data.deliveryCharges.value
+          : this.deliveryCharges,
       notes: data.notes.present ? data.notes.value : this.notes,
       kitchenTicketCount: data.kitchenTicketCount.present
           ? data.kitchenTicketCount.value
@@ -3061,6 +3165,10 @@ class Order extends DataClass implements Insertable<Order> {
           ..write('taxPercent: $taxPercent, ')
           ..write('serviceChargePercent: $serviceChargePercent, ')
           ..write('serviceChargeFixed: $serviceChargeFixed, ')
+          ..write('orderType: $orderType, ')
+          ..write('riderId: $riderId, ')
+          ..write('riderName: $riderName, ')
+          ..write('deliveryCharges: $deliveryCharges, ')
           ..write('notes: $notes, ')
           ..write('kitchenTicketCount: $kitchenTicketCount, ')
           ..write('guestCount: $guestCount, ')
@@ -3071,24 +3179,29 @@ class Order extends DataClass implements Insertable<Order> {
   }
 
   @override
-  int get hashCode => Object.hash(
-      id,
-      orderNumber,
-      tableId,
-      tableNameCol,
-      waiterId,
-      waiterName,
-      status,
-      discountPercent,
-      discountAmount,
-      taxPercent,
-      serviceChargePercent,
-      serviceChargeFixed,
-      notes,
-      kitchenTicketCount,
-      guestCount,
-      createdAt,
-      paidAt);
+  int get hashCode => Object.hashAll([
+        id,
+        orderNumber,
+        tableId,
+        tableNameCol,
+        waiterId,
+        waiterName,
+        status,
+        discountPercent,
+        discountAmount,
+        taxPercent,
+        serviceChargePercent,
+        serviceChargeFixed,
+        orderType,
+        riderId,
+        riderName,
+        deliveryCharges,
+        notes,
+        kitchenTicketCount,
+        guestCount,
+        createdAt,
+        paidAt
+      ]);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -3105,6 +3218,10 @@ class Order extends DataClass implements Insertable<Order> {
           other.taxPercent == this.taxPercent &&
           other.serviceChargePercent == this.serviceChargePercent &&
           other.serviceChargeFixed == this.serviceChargeFixed &&
+          other.orderType == this.orderType &&
+          other.riderId == this.riderId &&
+          other.riderName == this.riderName &&
+          other.deliveryCharges == this.deliveryCharges &&
           other.notes == this.notes &&
           other.kitchenTicketCount == this.kitchenTicketCount &&
           other.guestCount == this.guestCount &&
@@ -3125,6 +3242,10 @@ class OrdersCompanion extends UpdateCompanion<Order> {
   final Value<double> taxPercent;
   final Value<double> serviceChargePercent;
   final Value<double> serviceChargeFixed;
+  final Value<String> orderType;
+  final Value<int?> riderId;
+  final Value<String?> riderName;
+  final Value<double> deliveryCharges;
   final Value<String> notes;
   final Value<int> kitchenTicketCount;
   final Value<int> guestCount;
@@ -3143,6 +3264,10 @@ class OrdersCompanion extends UpdateCompanion<Order> {
     this.taxPercent = const Value.absent(),
     this.serviceChargePercent = const Value.absent(),
     this.serviceChargeFixed = const Value.absent(),
+    this.orderType = const Value.absent(),
+    this.riderId = const Value.absent(),
+    this.riderName = const Value.absent(),
+    this.deliveryCharges = const Value.absent(),
     this.notes = const Value.absent(),
     this.kitchenTicketCount = const Value.absent(),
     this.guestCount = const Value.absent(),
@@ -3162,6 +3287,10 @@ class OrdersCompanion extends UpdateCompanion<Order> {
     this.taxPercent = const Value.absent(),
     this.serviceChargePercent = const Value.absent(),
     this.serviceChargeFixed = const Value.absent(),
+    this.orderType = const Value.absent(),
+    this.riderId = const Value.absent(),
+    this.riderName = const Value.absent(),
+    this.deliveryCharges = const Value.absent(),
     this.notes = const Value.absent(),
     this.kitchenTicketCount = const Value.absent(),
     this.guestCount = const Value.absent(),
@@ -3185,6 +3314,10 @@ class OrdersCompanion extends UpdateCompanion<Order> {
     Expression<double>? taxPercent,
     Expression<double>? serviceChargePercent,
     Expression<double>? serviceChargeFixed,
+    Expression<String>? orderType,
+    Expression<int>? riderId,
+    Expression<String>? riderName,
+    Expression<double>? deliveryCharges,
     Expression<String>? notes,
     Expression<int>? kitchenTicketCount,
     Expression<int>? guestCount,
@@ -3206,6 +3339,10 @@ class OrdersCompanion extends UpdateCompanion<Order> {
         'service_charge_percent': serviceChargePercent,
       if (serviceChargeFixed != null)
         'service_charge_fixed': serviceChargeFixed,
+      if (orderType != null) 'order_type': orderType,
+      if (riderId != null) 'rider_id': riderId,
+      if (riderName != null) 'rider_name': riderName,
+      if (deliveryCharges != null) 'delivery_charges': deliveryCharges,
       if (notes != null) 'notes': notes,
       if (kitchenTicketCount != null)
         'kitchen_ticket_count': kitchenTicketCount,
@@ -3228,6 +3365,10 @@ class OrdersCompanion extends UpdateCompanion<Order> {
       Value<double>? taxPercent,
       Value<double>? serviceChargePercent,
       Value<double>? serviceChargeFixed,
+      Value<String>? orderType,
+      Value<int?>? riderId,
+      Value<String?>? riderName,
+      Value<double>? deliveryCharges,
       Value<String>? notes,
       Value<int>? kitchenTicketCount,
       Value<int>? guestCount,
@@ -3246,6 +3387,10 @@ class OrdersCompanion extends UpdateCompanion<Order> {
       taxPercent: taxPercent ?? this.taxPercent,
       serviceChargePercent: serviceChargePercent ?? this.serviceChargePercent,
       serviceChargeFixed: serviceChargeFixed ?? this.serviceChargeFixed,
+      orderType: orderType ?? this.orderType,
+      riderId: riderId ?? this.riderId,
+      riderName: riderName ?? this.riderName,
+      deliveryCharges: deliveryCharges ?? this.deliveryCharges,
       notes: notes ?? this.notes,
       kitchenTicketCount: kitchenTicketCount ?? this.kitchenTicketCount,
       guestCount: guestCount ?? this.guestCount,
@@ -3294,6 +3439,18 @@ class OrdersCompanion extends UpdateCompanion<Order> {
     if (serviceChargeFixed.present) {
       map['service_charge_fixed'] = Variable<double>(serviceChargeFixed.value);
     }
+    if (orderType.present) {
+      map['order_type'] = Variable<String>(orderType.value);
+    }
+    if (riderId.present) {
+      map['rider_id'] = Variable<int>(riderId.value);
+    }
+    if (riderName.present) {
+      map['rider_name'] = Variable<String>(riderName.value);
+    }
+    if (deliveryCharges.present) {
+      map['delivery_charges'] = Variable<double>(deliveryCharges.value);
+    }
     if (notes.present) {
       map['notes'] = Variable<String>(notes.value);
     }
@@ -3327,6 +3484,10 @@ class OrdersCompanion extends UpdateCompanion<Order> {
           ..write('taxPercent: $taxPercent, ')
           ..write('serviceChargePercent: $serviceChargePercent, ')
           ..write('serviceChargeFixed: $serviceChargeFixed, ')
+          ..write('orderType: $orderType, ')
+          ..write('riderId: $riderId, ')
+          ..write('riderName: $riderName, ')
+          ..write('deliveryCharges: $deliveryCharges, ')
           ..write('notes: $notes, ')
           ..write('kitchenTicketCount: $kitchenTicketCount, ')
           ..write('guestCount: $guestCount, ')
@@ -4476,6 +4637,14 @@ class $InvoicesTable extends Invoices with TableInfo<$InvoicesTable, Invoice> {
           type: DriftSqlType.double,
           requiredDuringInsert: false,
           defaultValue: const Constant(0.0));
+  static const VerificationMeta _deliveryChargesMeta =
+      const VerificationMeta('deliveryCharges');
+  @override
+  late final GeneratedColumn<double> deliveryCharges = GeneratedColumn<double>(
+      'delivery_charges', aliasedName, false,
+      type: DriftSqlType.double,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(0.0));
   static const VerificationMeta _grandTotalMeta =
       const VerificationMeta('grandTotal');
   @override
@@ -4555,6 +4724,7 @@ class $InvoicesTable extends Invoices with TableInfo<$InvoicesTable, Invoice> {
         discountValue,
         taxValue,
         serviceChargeValue,
+        deliveryCharges,
         grandTotal,
         amountPaid,
         changeAmount,
@@ -4638,6 +4808,12 @@ class $InvoicesTable extends Invoices with TableInfo<$InvoicesTable, Invoice> {
           serviceChargeValue.isAcceptableOrUnknown(
               data['service_charge_value']!, _serviceChargeValueMeta));
     }
+    if (data.containsKey('delivery_charges')) {
+      context.handle(
+          _deliveryChargesMeta,
+          deliveryCharges.isAcceptableOrUnknown(
+              data['delivery_charges']!, _deliveryChargesMeta));
+    }
     if (data.containsKey('grand_total')) {
       context.handle(
           _grandTotalMeta,
@@ -4719,6 +4895,8 @@ class $InvoicesTable extends Invoices with TableInfo<$InvoicesTable, Invoice> {
           .read(DriftSqlType.double, data['${effectivePrefix}tax_value'])!,
       serviceChargeValue: attachedDatabase.typeMapping.read(
           DriftSqlType.double, data['${effectivePrefix}service_charge_value'])!,
+      deliveryCharges: attachedDatabase.typeMapping.read(
+          DriftSqlType.double, data['${effectivePrefix}delivery_charges'])!,
       grandTotal: attachedDatabase.typeMapping
           .read(DriftSqlType.double, data['${effectivePrefix}grand_total'])!,
       amountPaid: attachedDatabase.typeMapping
@@ -4757,6 +4935,7 @@ class Invoice extends DataClass implements Insertable<Invoice> {
   final double discountValue;
   final double taxValue;
   final double serviceChargeValue;
+  final double deliveryCharges;
   final double grandTotal;
   final double amountPaid;
   final double changeAmount;
@@ -4777,6 +4956,7 @@ class Invoice extends DataClass implements Insertable<Invoice> {
       required this.discountValue,
       required this.taxValue,
       required this.serviceChargeValue,
+      required this.deliveryCharges,
       required this.grandTotal,
       required this.amountPaid,
       required this.changeAmount,
@@ -4799,6 +4979,7 @@ class Invoice extends DataClass implements Insertable<Invoice> {
     map['discount_value'] = Variable<double>(discountValue);
     map['tax_value'] = Variable<double>(taxValue);
     map['service_charge_value'] = Variable<double>(serviceChargeValue);
+    map['delivery_charges'] = Variable<double>(deliveryCharges);
     map['grand_total'] = Variable<double>(grandTotal);
     map['amount_paid'] = Variable<double>(amountPaid);
     map['change_amount'] = Variable<double>(changeAmount);
@@ -4825,6 +5006,7 @@ class Invoice extends DataClass implements Insertable<Invoice> {
       discountValue: Value(discountValue),
       taxValue: Value(taxValue),
       serviceChargeValue: Value(serviceChargeValue),
+      deliveryCharges: Value(deliveryCharges),
       grandTotal: Value(grandTotal),
       amountPaid: Value(amountPaid),
       changeAmount: Value(changeAmount),
@@ -4854,6 +5036,7 @@ class Invoice extends DataClass implements Insertable<Invoice> {
       taxValue: serializer.fromJson<double>(json['taxValue']),
       serviceChargeValue:
           serializer.fromJson<double>(json['serviceChargeValue']),
+      deliveryCharges: serializer.fromJson<double>(json['deliveryCharges']),
       grandTotal: serializer.fromJson<double>(json['grandTotal']),
       amountPaid: serializer.fromJson<double>(json['amountPaid']),
       changeAmount: serializer.fromJson<double>(json['changeAmount']),
@@ -4879,6 +5062,7 @@ class Invoice extends DataClass implements Insertable<Invoice> {
       'discountValue': serializer.toJson<double>(discountValue),
       'taxValue': serializer.toJson<double>(taxValue),
       'serviceChargeValue': serializer.toJson<double>(serviceChargeValue),
+      'deliveryCharges': serializer.toJson<double>(deliveryCharges),
       'grandTotal': serializer.toJson<double>(grandTotal),
       'amountPaid': serializer.toJson<double>(amountPaid),
       'changeAmount': serializer.toJson<double>(changeAmount),
@@ -4902,6 +5086,7 @@ class Invoice extends DataClass implements Insertable<Invoice> {
           double? discountValue,
           double? taxValue,
           double? serviceChargeValue,
+          double? deliveryCharges,
           double? grandTotal,
           double? amountPaid,
           double? changeAmount,
@@ -4922,6 +5107,7 @@ class Invoice extends DataClass implements Insertable<Invoice> {
         discountValue: discountValue ?? this.discountValue,
         taxValue: taxValue ?? this.taxValue,
         serviceChargeValue: serviceChargeValue ?? this.serviceChargeValue,
+        deliveryCharges: deliveryCharges ?? this.deliveryCharges,
         grandTotal: grandTotal ?? this.grandTotal,
         amountPaid: amountPaid ?? this.amountPaid,
         changeAmount: changeAmount ?? this.changeAmount,
@@ -4954,6 +5140,9 @@ class Invoice extends DataClass implements Insertable<Invoice> {
       serviceChargeValue: data.serviceChargeValue.present
           ? data.serviceChargeValue.value
           : this.serviceChargeValue,
+      deliveryCharges: data.deliveryCharges.present
+          ? data.deliveryCharges.value
+          : this.deliveryCharges,
       grandTotal:
           data.grandTotal.present ? data.grandTotal.value : this.grandTotal,
       amountPaid:
@@ -4988,6 +5177,7 @@ class Invoice extends DataClass implements Insertable<Invoice> {
           ..write('discountValue: $discountValue, ')
           ..write('taxValue: $taxValue, ')
           ..write('serviceChargeValue: $serviceChargeValue, ')
+          ..write('deliveryCharges: $deliveryCharges, ')
           ..write('grandTotal: $grandTotal, ')
           ..write('amountPaid: $amountPaid, ')
           ..write('changeAmount: $changeAmount, ')
@@ -5013,6 +5203,7 @@ class Invoice extends DataClass implements Insertable<Invoice> {
       discountValue,
       taxValue,
       serviceChargeValue,
+      deliveryCharges,
       grandTotal,
       amountPaid,
       changeAmount,
@@ -5036,6 +5227,7 @@ class Invoice extends DataClass implements Insertable<Invoice> {
           other.discountValue == this.discountValue &&
           other.taxValue == this.taxValue &&
           other.serviceChargeValue == this.serviceChargeValue &&
+          other.deliveryCharges == this.deliveryCharges &&
           other.grandTotal == this.grandTotal &&
           other.amountPaid == this.amountPaid &&
           other.changeAmount == this.changeAmount &&
@@ -5058,6 +5250,7 @@ class InvoicesCompanion extends UpdateCompanion<Invoice> {
   final Value<double> discountValue;
   final Value<double> taxValue;
   final Value<double> serviceChargeValue;
+  final Value<double> deliveryCharges;
   final Value<double> grandTotal;
   final Value<double> amountPaid;
   final Value<double> changeAmount;
@@ -5078,6 +5271,7 @@ class InvoicesCompanion extends UpdateCompanion<Invoice> {
     this.discountValue = const Value.absent(),
     this.taxValue = const Value.absent(),
     this.serviceChargeValue = const Value.absent(),
+    this.deliveryCharges = const Value.absent(),
     this.grandTotal = const Value.absent(),
     this.amountPaid = const Value.absent(),
     this.changeAmount = const Value.absent(),
@@ -5099,6 +5293,7 @@ class InvoicesCompanion extends UpdateCompanion<Invoice> {
     this.discountValue = const Value.absent(),
     this.taxValue = const Value.absent(),
     this.serviceChargeValue = const Value.absent(),
+    this.deliveryCharges = const Value.absent(),
     required double grandTotal,
     required double amountPaid,
     this.changeAmount = const Value.absent(),
@@ -5127,6 +5322,7 @@ class InvoicesCompanion extends UpdateCompanion<Invoice> {
     Expression<double>? discountValue,
     Expression<double>? taxValue,
     Expression<double>? serviceChargeValue,
+    Expression<double>? deliveryCharges,
     Expression<double>? grandTotal,
     Expression<double>? amountPaid,
     Expression<double>? changeAmount,
@@ -5149,6 +5345,7 @@ class InvoicesCompanion extends UpdateCompanion<Invoice> {
       if (taxValue != null) 'tax_value': taxValue,
       if (serviceChargeValue != null)
         'service_charge_value': serviceChargeValue,
+      if (deliveryCharges != null) 'delivery_charges': deliveryCharges,
       if (grandTotal != null) 'grand_total': grandTotal,
       if (amountPaid != null) 'amount_paid': amountPaid,
       if (changeAmount != null) 'change_amount': changeAmount,
@@ -5172,6 +5369,7 @@ class InvoicesCompanion extends UpdateCompanion<Invoice> {
       Value<double>? discountValue,
       Value<double>? taxValue,
       Value<double>? serviceChargeValue,
+      Value<double>? deliveryCharges,
       Value<double>? grandTotal,
       Value<double>? amountPaid,
       Value<double>? changeAmount,
@@ -5192,6 +5390,7 @@ class InvoicesCompanion extends UpdateCompanion<Invoice> {
       discountValue: discountValue ?? this.discountValue,
       taxValue: taxValue ?? this.taxValue,
       serviceChargeValue: serviceChargeValue ?? this.serviceChargeValue,
+      deliveryCharges: deliveryCharges ?? this.deliveryCharges,
       grandTotal: grandTotal ?? this.grandTotal,
       amountPaid: amountPaid ?? this.amountPaid,
       changeAmount: changeAmount ?? this.changeAmount,
@@ -5237,6 +5436,9 @@ class InvoicesCompanion extends UpdateCompanion<Invoice> {
     if (serviceChargeValue.present) {
       map['service_charge_value'] = Variable<double>(serviceChargeValue.value);
     }
+    if (deliveryCharges.present) {
+      map['delivery_charges'] = Variable<double>(deliveryCharges.value);
+    }
     if (grandTotal.present) {
       map['grand_total'] = Variable<double>(grandTotal.value);
     }
@@ -5280,6 +5482,7 @@ class InvoicesCompanion extends UpdateCompanion<Invoice> {
           ..write('discountValue: $discountValue, ')
           ..write('taxValue: $taxValue, ')
           ..write('serviceChargeValue: $serviceChargeValue, ')
+          ..write('deliveryCharges: $deliveryCharges, ')
           ..write('grandTotal: $grandTotal, ')
           ..write('amountPaid: $amountPaid, ')
           ..write('changeAmount: $changeAmount, ')
@@ -11585,6 +11788,10 @@ typedef $$OrdersTableCreateCompanionBuilder = OrdersCompanion Function({
   Value<double> taxPercent,
   Value<double> serviceChargePercent,
   Value<double> serviceChargeFixed,
+  Value<String> orderType,
+  Value<int?> riderId,
+  Value<String?> riderName,
+  Value<double> deliveryCharges,
   Value<String> notes,
   Value<int> kitchenTicketCount,
   Value<int> guestCount,
@@ -11604,6 +11811,10 @@ typedef $$OrdersTableUpdateCompanionBuilder = OrdersCompanion Function({
   Value<double> taxPercent,
   Value<double> serviceChargePercent,
   Value<double> serviceChargeFixed,
+  Value<String> orderType,
+  Value<int?> riderId,
+  Value<String?> riderName,
+  Value<double> deliveryCharges,
   Value<String> notes,
   Value<int> kitchenTicketCount,
   Value<int> guestCount,
@@ -11715,6 +11926,19 @@ class $$OrdersTableFilterComposer
 
   ColumnFilters<double> get serviceChargeFixed => $composableBuilder(
       column: $table.serviceChargeFixed,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get orderType => $composableBuilder(
+      column: $table.orderType, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get riderId => $composableBuilder(
+      column: $table.riderId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get riderName => $composableBuilder(
+      column: $table.riderName, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<double> get deliveryCharges => $composableBuilder(
+      column: $table.deliveryCharges,
       builder: (column) => ColumnFilters(column));
 
   ColumnFilters<String> get notes => $composableBuilder(
@@ -11860,6 +12084,19 @@ class $$OrdersTableOrderingComposer
       column: $table.serviceChargeFixed,
       builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<String> get orderType => $composableBuilder(
+      column: $table.orderType, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get riderId => $composableBuilder(
+      column: $table.riderId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get riderName => $composableBuilder(
+      column: $table.riderName, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<double> get deliveryCharges => $composableBuilder(
+      column: $table.deliveryCharges,
+      builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<String> get notes => $composableBuilder(
       column: $table.notes, builder: (column) => ColumnOrderings(column));
 
@@ -11955,6 +12192,18 @@ class $$OrdersTableAnnotationComposer
 
   GeneratedColumn<double> get serviceChargeFixed => $composableBuilder(
       column: $table.serviceChargeFixed, builder: (column) => column);
+
+  GeneratedColumn<String> get orderType =>
+      $composableBuilder(column: $table.orderType, builder: (column) => column);
+
+  GeneratedColumn<int> get riderId =>
+      $composableBuilder(column: $table.riderId, builder: (column) => column);
+
+  GeneratedColumn<String> get riderName =>
+      $composableBuilder(column: $table.riderName, builder: (column) => column);
+
+  GeneratedColumn<double> get deliveryCharges => $composableBuilder(
+      column: $table.deliveryCharges, builder: (column) => column);
 
   GeneratedColumn<String> get notes =>
       $composableBuilder(column: $table.notes, builder: (column) => column);
@@ -12093,6 +12342,10 @@ class $$OrdersTableTableManager extends RootTableManager<
             Value<double> taxPercent = const Value.absent(),
             Value<double> serviceChargePercent = const Value.absent(),
             Value<double> serviceChargeFixed = const Value.absent(),
+            Value<String> orderType = const Value.absent(),
+            Value<int?> riderId = const Value.absent(),
+            Value<String?> riderName = const Value.absent(),
+            Value<double> deliveryCharges = const Value.absent(),
             Value<String> notes = const Value.absent(),
             Value<int> kitchenTicketCount = const Value.absent(),
             Value<int> guestCount = const Value.absent(),
@@ -12112,6 +12365,10 @@ class $$OrdersTableTableManager extends RootTableManager<
             taxPercent: taxPercent,
             serviceChargePercent: serviceChargePercent,
             serviceChargeFixed: serviceChargeFixed,
+            orderType: orderType,
+            riderId: riderId,
+            riderName: riderName,
+            deliveryCharges: deliveryCharges,
             notes: notes,
             kitchenTicketCount: kitchenTicketCount,
             guestCount: guestCount,
@@ -12131,6 +12388,10 @@ class $$OrdersTableTableManager extends RootTableManager<
             Value<double> taxPercent = const Value.absent(),
             Value<double> serviceChargePercent = const Value.absent(),
             Value<double> serviceChargeFixed = const Value.absent(),
+            Value<String> orderType = const Value.absent(),
+            Value<int?> riderId = const Value.absent(),
+            Value<String?> riderName = const Value.absent(),
+            Value<double> deliveryCharges = const Value.absent(),
             Value<String> notes = const Value.absent(),
             Value<int> kitchenTicketCount = const Value.absent(),
             Value<int> guestCount = const Value.absent(),
@@ -12150,6 +12411,10 @@ class $$OrdersTableTableManager extends RootTableManager<
             taxPercent: taxPercent,
             serviceChargePercent: serviceChargePercent,
             serviceChargeFixed: serviceChargeFixed,
+            orderType: orderType,
+            riderId: riderId,
+            riderName: riderName,
+            deliveryCharges: deliveryCharges,
             notes: notes,
             kitchenTicketCount: kitchenTicketCount,
             guestCount: guestCount,
@@ -13162,6 +13427,7 @@ typedef $$InvoicesTableCreateCompanionBuilder = InvoicesCompanion Function({
   Value<double> discountValue,
   Value<double> taxValue,
   Value<double> serviceChargeValue,
+  Value<double> deliveryCharges,
   required double grandTotal,
   required double amountPaid,
   Value<double> changeAmount,
@@ -13183,6 +13449,7 @@ typedef $$InvoicesTableUpdateCompanionBuilder = InvoicesCompanion Function({
   Value<double> discountValue,
   Value<double> taxValue,
   Value<double> serviceChargeValue,
+  Value<double> deliveryCharges,
   Value<double> grandTotal,
   Value<double> amountPaid,
   Value<double> changeAmount,
@@ -13248,6 +13515,10 @@ class $$InvoicesTableFilterComposer
 
   ColumnFilters<double> get serviceChargeValue => $composableBuilder(
       column: $table.serviceChargeValue,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<double> get deliveryCharges => $composableBuilder(
+      column: $table.deliveryCharges,
       builder: (column) => ColumnFilters(column));
 
   ColumnFilters<double> get grandTotal => $composableBuilder(
@@ -13339,6 +13610,10 @@ class $$InvoicesTableOrderingComposer
       column: $table.serviceChargeValue,
       builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<double> get deliveryCharges => $composableBuilder(
+      column: $table.deliveryCharges,
+      builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<double> get grandTotal => $composableBuilder(
       column: $table.grandTotal, builder: (column) => ColumnOrderings(column));
 
@@ -13426,6 +13701,9 @@ class $$InvoicesTableAnnotationComposer
   GeneratedColumn<double> get serviceChargeValue => $composableBuilder(
       column: $table.serviceChargeValue, builder: (column) => column);
 
+  GeneratedColumn<double> get deliveryCharges => $composableBuilder(
+      column: $table.deliveryCharges, builder: (column) => column);
+
   GeneratedColumn<double> get grandTotal => $composableBuilder(
       column: $table.grandTotal, builder: (column) => column);
 
@@ -13507,6 +13785,7 @@ class $$InvoicesTableTableManager extends RootTableManager<
             Value<double> discountValue = const Value.absent(),
             Value<double> taxValue = const Value.absent(),
             Value<double> serviceChargeValue = const Value.absent(),
+            Value<double> deliveryCharges = const Value.absent(),
             Value<double> grandTotal = const Value.absent(),
             Value<double> amountPaid = const Value.absent(),
             Value<double> changeAmount = const Value.absent(),
@@ -13528,6 +13807,7 @@ class $$InvoicesTableTableManager extends RootTableManager<
             discountValue: discountValue,
             taxValue: taxValue,
             serviceChargeValue: serviceChargeValue,
+            deliveryCharges: deliveryCharges,
             grandTotal: grandTotal,
             amountPaid: amountPaid,
             changeAmount: changeAmount,
@@ -13549,6 +13829,7 @@ class $$InvoicesTableTableManager extends RootTableManager<
             Value<double> discountValue = const Value.absent(),
             Value<double> taxValue = const Value.absent(),
             Value<double> serviceChargeValue = const Value.absent(),
+            Value<double> deliveryCharges = const Value.absent(),
             required double grandTotal,
             required double amountPaid,
             Value<double> changeAmount = const Value.absent(),
@@ -13570,6 +13851,7 @@ class $$InvoicesTableTableManager extends RootTableManager<
             discountValue: discountValue,
             taxValue: taxValue,
             serviceChargeValue: serviceChargeValue,
+            deliveryCharges: deliveryCharges,
             grandTotal: grandTotal,
             amountPaid: amountPaid,
             changeAmount: changeAmount,

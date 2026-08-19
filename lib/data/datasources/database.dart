@@ -128,6 +128,10 @@ class Orders extends Table {
   RealColumn get taxPercent => real().withDefault(const Constant(0.0))();
   RealColumn get serviceChargePercent => real().withDefault(const Constant(0.0))();
   RealColumn get serviceChargeFixed => real().withDefault(const Constant(0.0))();
+  TextColumn get orderType => text().withDefault(const Constant('dine_in'))();
+  IntColumn get riderId => integer().nullable()();
+  TextColumn get riderName => text().nullable()();
+  RealColumn get deliveryCharges => real().withDefault(const Constant(0.0))();
   TextColumn get notes => text().withDefault(const Constant(''))();
   IntColumn get kitchenTicketCount => integer().withDefault(const Constant(0))();
   IntColumn get guestCount => integer().withDefault(const Constant(1))();
@@ -164,6 +168,7 @@ class Invoices extends Table {
   RealColumn get discountValue => real().withDefault(const Constant(0.0))();
   RealColumn get taxValue => real().withDefault(const Constant(0.0))();
   RealColumn get serviceChargeValue => real().withDefault(const Constant(0.0))();
+  RealColumn get deliveryCharges => real().withDefault(const Constant(0.0))();
   RealColumn get grandTotal => real()();
   RealColumn get amountPaid => real()();
   RealColumn get changeAmount => real().withDefault(const Constant(0.0))();
@@ -534,11 +539,15 @@ class RegisterDao extends DatabaseAccessor<AppDatabase> with _$RegisterDaoMixin 
     (update(cashRegisters)..where((r) => r.id.equals(id))).write(c);
   Future<int> addExpense(ExpensesCompanion c) => into(expenses).insert(c);
   Future<List<ExpenseRow>> expensesForRegister(int regId) =>
-    (select(expenses)..where((e) => e.registerId.equals(regId))).get();
+    (select(expenses)..where((e) => e.registerId.equals(regId))..orderBy([(e) => OrderingTerm.desc(e.createdAt)])).get();
   Future<List<ExpenseRow>> expensesForPeriod(DateTime start, DateTime end) =>
     (select(expenses)..where((e) => e.createdAt.isBetweenValues(start, end))..orderBy([(e) => OrderingTerm.desc(e.createdAt)])).get();
   Future<List<CashRegisterRow>> history() =>
     (select(cashRegisters)..orderBy([(r) => OrderingTerm.desc(r.openedAt)])).get();
+  Stream<List<CashRegisterRow>> watchHistory() =>
+    (select(cashRegisters)..orderBy([(r) => OrderingTerm.desc(r.openedAt)])).watch();
+  Future<List<CashRegisterRow>> historyForPeriod(DateTime start, DateTime end) =>
+    (select(cashRegisters)..where((r) => r.openedAt.isBetweenValues(start, end))..orderBy([(r) => OrderingTerm.desc(r.openedAt)])).get();
 }
 
 @DriftAccessor(tables: [Attendance, SalaryPayments])
@@ -559,7 +568,22 @@ class HRDao extends DatabaseAccessor<AppDatabase> with _$HRDaoMixin {
     (select(attendance)..where((a) => a.checkIn.isBetweenValues(start, end))).get();
   Future<List<SalaryPaymentRow>> salaryForUser(int userId) =>
     (select(salaryPayments)..where((s) => s.userId.equals(userId))..orderBy([(s) => OrderingTerm.desc(s.paidAt)])).get();
+  Stream<List<SalaryPaymentRow>> watchSalaryForUser(int userId) =>
+    (select(salaryPayments)..where((s) => s.userId.equals(userId))..orderBy([(s) => OrderingTerm.desc(s.paidAt)])).watch();
+  Future<List<SalaryPaymentRow>> salaryForUserMonth(int userId, int month, int year) =>
+    (select(salaryPayments)..where((s) => s.userId.equals(userId) & s.month.equals(month) & s.year.equals(year))..orderBy([(s) => OrderingTerm.desc(s.paidAt)])).get();
+  Future<double> totalSalaryPaidMonth(int userId, int month, int year) async {
+    final q = selectOnly(salaryPayments)
+      ..addColumns([salaryPayments.amount.sum()])
+      ..where(salaryPayments.userId.equals(userId) & salaryPayments.month.equals(month) & salaryPayments.year.equals(year));
+    final r = await q.getSingle();
+    return r.read(salaryPayments.amount.sum()) ?? 0.0;
+  }
   Future<void> paySalary(SalaryPaymentsCompanion c) => into(salaryPayments).insert(c);
+  Future<void> updateSalaryPayment(int id, SalaryPaymentsCompanion c) =>
+    (update(salaryPayments)..where((s) => s.id.equals(id))).write(c);
+  Future<void> deleteSalaryPayment(int id) =>
+    (delete(salaryPayments)..where((s) => s.id.equals(id))).go();
 }
 
 @DriftAccessor(tables: [AppSettings])
@@ -596,7 +620,7 @@ class SettingsDao extends DatabaseAccessor<AppDatabase> with _$SettingsDaoMixin 
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _open());
 
-  @override int get schemaVersion => 4;
+  @override int get schemaVersion => 5;
 
   @override MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) async {
@@ -617,8 +641,40 @@ class AppDatabase extends _$AppDatabase {
       if (from < 4) {
         await m.addColumn(orders, orders.serviceChargeFixed);
       }
+      if (from < 5) {
+        await m.addColumn(orders, orders.orderType);
+        await m.addColumn(orders, orders.riderId);
+        await m.addColumn(orders, orders.riderName);
+        await m.addColumn(orders, orders.deliveryCharges);
+        await m.addColumn(invoices, invoices.deliveryCharges);
+      }
+    },
+    beforeOpen: (m) async {
+      if (m.wasCreated) return;
+      await _ensureDeliveryFloor();
     },
   );
+
+  Future<void> _ensureDeliveryFloor() async {
+    final existing = await select(floors).get();
+    final hasDelivery = existing.any((f) => f.name == 'Delivery');
+    if (!hasDelivery) {
+      final sortOrder = existing.isEmpty ? 3 : (existing.map((f) => f.sortOrder).reduce((a, b) => a > b ? a : b) + 1);
+      final floorId = await into(floors).insert(FloorsCompanion.insert(
+        name: 'Delivery', prefix: const Value('D'), sortOrder: Value(sortOrder)));
+      for (int i = 1; i <= 5; i++) {
+        await into(restaurantTables).insert(RestaurantTablesCompanion.insert(
+          floorId: floorId, name: 'Rider $i',
+          capacity: const Value(1), shape: const Value('rider'),
+          posX: Value(40.0 + (i - 1) * 200), posY: const Value(80),
+        ));
+      }
+    }
+    final settings = await settingsDao.getAll();
+    if (!settings.containsKey('default_delivery_charges')) {
+      await settingsDao.set('default_delivery_charges', '150');
+    }
+  }
 
   Future<void> _seed() async {
     final now = DateTime.now();
@@ -645,6 +701,19 @@ class AppDatabase extends _$AppDatabase {
         floorId: floor2, name: 'R${i - 8}',
         capacity: const Value(6),
         posX: Value(40.0 + col * 220),
+        posY: const Value(80),
+      ));
+    }
+
+    // Seed Delivery floor with riders
+    final floor3 = await into(floors).insert(FloorsCompanion.insert(name: 'Delivery', prefix: const Value('D'), sortOrder: const Value(3)));
+    for (int i = 1; i <= 5; i++) {
+      final col = (i - 1) % 5;
+      await into(restaurantTables).insert(RestaurantTablesCompanion.insert(
+        floorId: floor3, name: 'Rider $i',
+        capacity: const Value(1),
+        shape: const Value('rider'),
+        posX: Value(40.0 + col * 200),
         posY: const Value(80),
       ));
     }
@@ -684,6 +753,7 @@ class AppDatabase extends _$AppDatabase {
     await settingsDao.set('currency_symbol', 'Rs');
     await settingsDao.set('receipt_width', '80');
     await settingsDao.set('auto_kitchen_print', 'true');
+    await settingsDao.set('default_delivery_charges', '150');
   }
 
   List<(String, double, double)> _sampleItems(String group, int gid) {

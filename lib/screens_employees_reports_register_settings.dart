@@ -419,86 +419,234 @@ class _SalaryTab extends ConsumerStatefulWidget {
 }
 
 class _SalaryTabState extends ConsumerState<_SalaryTab> {
-  final _now = DateTime.now();
+  int _selectedMonth = DateTime.now().month;
+  int _selectedYear = DateTime.now().year;
+  int? _expandedUserId;
+
+  static const _monthNames = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'];
 
   @override
   Widget build(BuildContext context) {
     final staffAsync = ref.watch(staffProvider);
+    final sym = ref.watch(settingsProvider).currencySymbol;
 
-    return staffAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text('Error: $e')),
-      data: (staff) => ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: staff.length,
-        itemBuilder: (_, i) {
-          final u = staff[i];
-          if (u.salary <= 0) return const SizedBox.shrink();
-          return AppCard(
-            margin: const EdgeInsets.only(bottom: 10),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                CircleAvatar(radius: 20, backgroundColor: context.cs.primary.withAlpha(20),
-                  child: Text(u.name.substring(0,1).toUpperCase(), style: TextStyle(color: context.cs.primary, fontWeight: FontWeight.w700))),
-                const SizedBox(width: 12),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(u.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                  Text('${u.role.name} · ${u.wageType.name}', style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant)),
-                ])),
-                Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                  Text('Rs ${u.salary.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-                  Text('per ${u.wageType.name}', style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
-                ]),
-                const SizedBox(width: 12),
-                FilledButton(
-                  onPressed: () => _showPaySalaryDialog(u),
-                  style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8)),
-                  child: const Text('Pay', style: TextStyle(fontSize: 13)),
-                ),
-              ]),
-              // Salary history
-              FutureBuilder<List<SalaryPaymentRow>>(
-                future: ref.watch(dbProvider).hRDao.salaryForUser(u.id),
-                builder: (_, snap) {
-                  final payments = snap.data ?? [];
-                  if (payments.isEmpty) return const SizedBox.shrink();
-                  final recent = payments.take(3).toList();
-                  return Column(children: [
-                    const Divider(height: 16),
-                    ...recent.map((p) => Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
+    return Column(children: [
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(children: [
+          IconButton(
+            icon: const Icon(Icons.chevron_left_rounded),
+            onPressed: () => setState(() {
+              _selectedMonth--;
+              if (_selectedMonth < 1) { _selectedMonth = 12; _selectedYear--; }
+            }),
+          ),
+          const SizedBox(width: 8),
+          Text('${_monthNames[_selectedMonth]} $_selectedYear',
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: const Icon(Icons.chevron_right_rounded),
+            onPressed: () => setState(() {
+              _selectedMonth++;
+              if (_selectedMonth > 12) { _selectedMonth = 1; _selectedYear++; }
+            }),
+          ),
+          const Spacer(),
+          TextButton(
+            onPressed: () => setState(() { _selectedMonth = DateTime.now().month; _selectedYear = DateTime.now().year; }),
+            child: const Text('Current month', style: TextStyle(fontSize: 12)),
+          ),
+        ]),
+      ),
+      Expanded(child: staffAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(child: Text('Error: $e')),
+        data: (staff) {
+          final paidStaff = staff.where((u) => u.salary > 0).toList();
+          if (paidStaff.isEmpty) return Center(child: Text('No staff with salary configured', style: TextStyle(color: context.cs.onSurfaceVariant)));
+          final db = ref.read(dbProvider);
+          return FutureBuilder<List<List<SalaryPaymentRow>>>(
+            future: Future.wait(paidStaff.map((u) => db.hRDao.salaryForUserMonth(u.id, _selectedMonth, _selectedYear))),
+            builder: (_, allSnap) {
+              final allPayments = allSnap.data ?? [];
+              double totalMonthly = 0, totalPaid = 0;
+              final paidMap = <int, double>{};
+              for (int i = 0; i < paidStaff.length; i++) {
+                final u = paidStaff[i];
+                totalMonthly += u.salary;
+                final paid = (i < allPayments.length) ? allPayments[i].fold(0.0, (s, p) => s + p.amount) : 0.0;
+                totalPaid += paid;
+                paidMap[u.id] = paid;
+              }
+              return ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: paidStaff.length + 1,
+                itemBuilder: (_, i) {
+                  if (i == 0) {
+                    return AppCard(
+                      margin: const EdgeInsets.only(bottom: 14),
                       child: Row(children: [
-                        Icon(Icons.payments_rounded, size: 14, color: Colors.green),
-                        const SizedBox(width: 6),
-                        Text('${p.month}/${p.year}', style: const TextStyle(fontSize: 12)),
-                        const Spacer(),
-                        Text('Rs ${p.amount.toStringAsFixed(0)}',
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.green)),
-                        const SizedBox(width: 8),
-                        Text(DateFormat('dd MMM').format(p.paidAt), style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+                        _SalarySummaryBox(label: 'Monthly Salary', value: '$sym ${totalMonthly.toStringAsFixed(0)}', color: context.cs.primary),
+                        const SizedBox(width: 20),
+                        _SalarySummaryBox(label: 'Paid (${_monthNames[_selectedMonth]})', value: '$sym ${totalPaid.toStringAsFixed(0)}', color: Colors.green),
+                        const SizedBox(width: 20),
+                        _SalarySummaryBox(label: 'Pending', value: '$sym ${(totalMonthly - totalPaid).toStringAsFixed(0)}', color: Colors.orange),
                       ]),
-                    )),
-                  ]);
+                    );
+                  }
+                  final u = paidStaff[i - 1];
+                  final paid = paidMap[u.id] ?? 0;
+                  final pending = u.salary - paid;
+                  final isExpanded = _expandedUserId == u.id;
+
+                  return AppCard(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      InkWell(
+                        onTap: () => setState(() => _expandedUserId = isExpanded ? null : u.id),
+                        borderRadius: BorderRadius.circular(12),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(children: [
+                            CircleAvatar(radius: 20, backgroundColor: context.cs.primary.withAlpha(20),
+                              child: Text(u.name.substring(0,1).toUpperCase(), style: TextStyle(color: context.cs.primary, fontWeight: FontWeight.w700))),
+                            const SizedBox(width: 12),
+                            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text(u.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                              Text('${u.role.name} · ${u.wageType.name}', style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant)),
+                            ])),
+                            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                              Text('Received: $sym ${paid.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Colors.green)),
+                              Text('Pending: $sym ${pending.toStringAsFixed(0)}', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: pending > 0 ? Colors.orange : Colors.green)),
+                            ]),
+                            const SizedBox(width: 12),
+                            Icon(isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded, size: 22),
+                          ]),
+                        ),
+                      ),
+                      if (isExpanded) _SalaryStaffDetail(user: u, month: _selectedMonth, year: _selectedYear, sym: sym),
+                    ]),
+                  );
                 },
-              ),
-            ]),
+              );
+            },
           );
         },
+      )),
+    ]);
+  }
+}
+
+class _SalarySummaryBox extends StatelessWidget {
+  const _SalarySummaryBox({required this.label, required this.value, required this.color});
+  final String label, value;
+  final Color color;
+  @override
+  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Text(label, style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+    const SizedBox(height: 2),
+    Text(value, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: color)),
+  ]);
+}
+
+class _SalaryStaffDetail extends ConsumerStatefulWidget {
+  const _SalaryStaffDetail({required this.user, required this.month, required this.year, required this.sym});
+  final UserEntity user;
+  final int month, year;
+  final String sym;
+  @override ConsumerState<_SalaryStaffDetail> createState() => _SalaryStaffDetailState();
+}
+
+class _SalaryStaffDetailState extends ConsumerState<_SalaryStaffDetail> {
+  @override
+  Widget build(BuildContext context) {
+    final u = widget.user;
+    final db = ref.read(dbProvider);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Divider(height: 16),
+      Row(children: [
+        FilledButton.icon(
+          icon: const Icon(Icons.payments_rounded, size: 16),
+          label: const Text('Pay Salary', style: TextStyle(fontSize: 13)),
+          onPressed: () => _showPayDialog(u),
+        ),
+        const SizedBox(width: 12),
+        Text('${widget.sym} ${u.salary.toStringAsFixed(0)} / ${u.wageType.name}',
+          style: TextStyle(fontSize: 13, color: context.cs.onSurfaceVariant)),
+      ]),
+      const SizedBox(height: 10),
+      FutureBuilder<List<SalaryPaymentRow>>(
+        future: db.hRDao.salaryForUserMonth(u.id, widget.month, widget.year),
+        builder: (_, snap) {
+          final payments = snap.data ?? [];
+          final paid = payments.fold(0.0, (s, p) => s + p.amount);
+          final pending = u.salary - paid;
+          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              _SalarySummaryBox(label: 'Paid this month', value: '${widget.sym} ${paid.toStringAsFixed(0)}', color: Colors.green),
+              const SizedBox(width: 20),
+              _SalarySummaryBox(label: 'Pending', value: '${widget.sym} ${pending.toStringAsFixed(0)}', color: pending > 0 ? Colors.orange : Colors.green),
+              const Spacer(),
+              if (payments.isNotEmpty)
+                Text('${payments.length} payment${payments.length > 1 ? 's' : ''}', style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant)),
+            ]),
+            if (payments.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              ...payments.map((p) => Container(
+                margin: const EdgeInsets.only(bottom: 6),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: context.bg,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: context.border, width: 0.5),
+                ),
+                child: Row(children: [
+                  Icon(Icons.payments_rounded, size: 14, color: Colors.green),
+                  const SizedBox(width: 8),
+                  Text(DateFormat('dd MMM yyyy  h:mm a').format(p.paidAt), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+                  if (p.notes != null && p.notes!.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    Expanded(child: Text('— ${p.notes}', style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant, fontStyle: FontStyle.italic), overflow: TextOverflow.ellipsis)),
+                  ] else
+                    const Spacer(),
+                  Text('${widget.sym} ${p.amount.toStringAsFixed(0)}',
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.green)),
+                  const SizedBox(width: 6),
+                  InkWell(
+                    onTap: () => _showEditPaymentDialog(p),
+                    child: Icon(Icons.edit_rounded, size: 16, color: context.cs.primary),
+                  ),
+                  const SizedBox(width: 6),
+                  InkWell(
+                    onTap: () => _confirmDeletePayment(p),
+                    child: const Icon(Icons.delete_rounded, size: 16, color: AppColors.error),
+                  ),
+                ]),
+              )),
+            ] else
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text('No payments this month', style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 13)),
+              ),
+          ]);
+        },
       ),
-    );
+    ]);
   }
 
-  void _showPaySalaryDialog(UserEntity u) {
+  void _showPayDialog(UserEntity u) {
     final amtCtrl = TextEditingController(text: u.salary.toStringAsFixed(0));
     final noteCtrl = TextEditingController();
     showDialog(context: context, builder: (_) => AlertDialog(
       title: Text('Pay salary — ${u.name}'),
       content: Column(mainAxisSize: MainAxisSize.min, children: [
-        Text('${_now.year}/${_now.month} — ${u.wageType.name}',
+        Text('${_SalaryTabState._monthNames[widget.month]} ${widget.year} — ${u.wageType.name}',
           style: TextStyle(color: context.cs.onSurfaceVariant)),
         const SizedBox(height: 12),
         TextField(controller: amtCtrl, keyboardType: TextInputType.number,
-          decoration: const InputDecoration(labelText: 'Amount', prefixText: 'Rs ')),
+          decoration: InputDecoration(labelText: 'Amount', prefixText: '${widget.sym} ')),
         const SizedBox(height: 10),
         TextField(controller: noteCtrl, decoration: const InputDecoration(labelText: 'Note (optional)')),
       ]),
@@ -510,12 +658,61 @@ class _SalaryTabState extends ConsumerState<_SalaryTab> {
             if (amount <= 0) return;
             await ref.read(dbProvider).hRDao.paySalary(SalaryPaymentsCompanion.insert(
               userId: u.id, userName: u.name,
-              month: _now.month, year: _now.year, amount: amount,
+              month: widget.month, year: widget.year, amount: amount,
               notes: Value(noteCtrl.text.isEmpty ? null : noteCtrl.text),
             ));
             if (mounted) { Navigator.pop(context); showSuccess(context, 'Salary paid to ${u.name}'); setState(() {}); }
           },
           child: const Text('Confirm payment'),
+        ),
+      ],
+    ));
+  }
+
+  void _showEditPaymentDialog(SalaryPaymentRow p) {
+    final amtCtrl = TextEditingController(text: p.amount.toStringAsFixed(0));
+    final noteCtrl = TextEditingController(text: p.notes ?? '');
+    showDialog(context: context, builder: (_) => AlertDialog(
+      title: const Text('Edit Payment'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text(DateFormat('dd MMM yyyy  h:mm a').format(p.paidAt), style: TextStyle(color: context.cs.onSurfaceVariant)),
+        const SizedBox(height: 12),
+        TextField(controller: amtCtrl, keyboardType: TextInputType.number,
+          decoration: InputDecoration(labelText: 'Amount', prefixText: '${widget.sym} ')),
+        const SizedBox(height: 10),
+        TextField(controller: noteCtrl, decoration: const InputDecoration(labelText: 'Note (optional)')),
+      ]),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () async {
+            final amount = double.tryParse(amtCtrl.text) ?? 0;
+            if (amount <= 0) return;
+            await ref.read(dbProvider).hRDao.updateSalaryPayment(p.id, SalaryPaymentsCompanion(
+              amount: Value(amount),
+              notes: Value(noteCtrl.text.isEmpty ? null : noteCtrl.text),
+            ));
+            if (mounted) { Navigator.pop(context); showSuccess(context, 'Payment updated'); setState(() {}); }
+          },
+          child: const Text('Save changes'),
+        ),
+      ],
+    ));
+  }
+
+  void _confirmDeletePayment(SalaryPaymentRow p) {
+    showDialog(context: context, builder: (_) => AlertDialog(
+      title: const Text('Delete Payment'),
+      content: Text('Delete payment of ${widget.sym} ${p.amount.toStringAsFixed(0)} from ${DateFormat('dd MMM yyyy').format(p.paidAt)}?'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () async {
+            await ref.read(dbProvider).hRDao.deleteSalaryPayment(p.id);
+            if (mounted) { Navigator.pop(context); showSuccess(context, 'Payment deleted'); setState(() {}); }
+          },
+          style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+          child: const Text('Delete'),
         ),
       ],
     ));
@@ -1080,7 +1277,7 @@ class _ZReportTabState extends ConsumerState<_ZReportTab> {
 }
 
 // ═══════════════════════════════════════════════════════
-// EXPENSE TRACKER SCREEN
+// EXPENSE REGISTER BOOK — Daily investment book, profit tracking
 // ═══════════════════════════════════════════════════════
 class ExpenseTrackerScreen extends ConsumerStatefulWidget {
   const ExpenseTrackerScreen({super.key});
@@ -1089,29 +1286,39 @@ class ExpenseTrackerScreen extends ConsumerStatefulWidget {
   ConsumerState<ExpenseTrackerScreen> createState() => _ExpenseTrackerScreenState();
 }
 
-class _ExpenseTrackerScreenState extends ConsumerState<ExpenseTrackerScreen> {
-  late DateTimeRange _range;
+class _ExpenseTrackerScreenState extends ConsumerState<ExpenseTrackerScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tab;
+  DateTime _selectedDay = DateTime.now();
+  int _selectedMonth = DateTime.now().month;
+  int _selectedYear = DateTime.now().year;
 
   static const _categories = [
-    'General',
-    'Rent',
-    'Utilities',
-    'Supplies',
-    'Groceries',
-    'Maintenance',
-    'Fuel',
-    'Staff meal',
-    'Delivery',
-    'Marketing',
-    'Other',
+    'General', 'Rent', 'Utilities', 'Supplies', 'Groceries',
+    'Maintenance', 'Fuel', 'Staff meal', 'Delivery', 'Marketing', 'Other',
   ];
 
   @override
   void initState() {
     super.initState();
-    final now = DateTime.now();
-    final start = DateTime(now.year, now.month, 1);
-    _range = DateTimeRange(start: start, end: now);
+    _tab = TabController(length: 2, vsync: this);
+  }
+
+  @override
+  void dispose() { _tab.dispose(); super.dispose(); }
+
+  DateTimeRange get _dayRange {
+    final start = DateTime(_selectedDay.year, _selectedDay.month, _selectedDay.day);
+    final end = start.add(const Duration(days: 1));
+    return DateTimeRange(start: start, end: end);
+  }
+
+  DateTimeRange get _monthRange {
+    final start = DateTime(_selectedYear, _selectedMonth, 1);
+    final end = (_selectedMonth < 12)
+      ? DateTime(_selectedYear, _selectedMonth + 1, 1)
+      : DateTime(_selectedYear + 1, 1, 1);
+    return DateTimeRange(start: start, end: end);
   }
 
   @override
@@ -1121,14 +1328,8 @@ class _ExpenseTrackerScreenState extends ConsumerState<ExpenseTrackerScreen> {
     return SideNav(child: Scaffold(
       appBar: AppBar(
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => context.go('/dashboard')),
-        title: const Text('Expense Tracker'),
+        title: const Text('Expense Register Book'),
         actions: [
-          OutlinedButton.icon(
-            icon: const Icon(Icons.date_range_rounded, size: 16),
-            label: Text('${DateFormat('dd MMM').format(_range.start)} - ${DateFormat('dd MMM').format(_range.end)}'),
-            onPressed: _pickDateRange,
-          ),
-          const SizedBox(width: 8),
           FilledButton.icon(
             icon: const Icon(Icons.add_rounded, size: 18),
             label: const Text('Add Expense'),
@@ -1137,95 +1338,444 @@ class _ExpenseTrackerScreenState extends ConsumerState<ExpenseTrackerScreen> {
           const SizedBox(width: 12),
           const TopBarActions(),
         ],
+        bottom: TabBar(
+          controller: _tab,
+          tabs: const [
+            Tab(text: 'Daily Book'),
+            Tab(text: 'Monthly Book'),
+          ],
+        ),
       ),
-      body: FutureBuilder<List<ExpenseRow>>(
-        future: ref.watch(dbProvider).registerDao.expensesForPeriod(_range.start, _range.end),
-        builder: (_, snap) {
-          if (!snap.hasData) return const Center(child: CircularProgressIndicator());
-          final expenses = snap.data!;
-          final total = expenses.fold(0.0, (sum, e) => sum + e.amount);
-          final byCategory = <String, double>{};
-          for (final expense in expenses) {
-            byCategory[expense.category] = (byCategory[expense.category] ?? 0) + expense.amount;
-          }
-          final categoryRows = byCategory.entries.toList()
-            ..sort((a, b) => b.value.compareTo(a.value));
+      body: TabBarView(
+        controller: _tab,
+        children: [
+          _buildDailyView(sym),
+          _buildMonthlyView(sym),
+        ],
+      ),
+    ));
+  }
 
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: 4,
-                childAspectRatio: 2.3,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                children: [
-                  _ReportKPI('Total expenses', '$sym ${total.toStringAsFixed(0)}', Icons.receipt_long, AppColors.error),
-                  _ReportKPI('Records', '${expenses.length}', Icons.list_alt_rounded, AppColors.orderOpen),
-                  _ReportKPI('Categories', '${byCategory.length}', Icons.category_rounded, AppColors.orderKitchen),
-                  _ReportKPI('Highest category', categoryRows.isEmpty ? '-' : categoryRows.first.key, Icons.trending_up_rounded, AppColors.warning),
-                ],
-              ),
-              const SizedBox(height: 18),
-              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Expanded(
-                  flex: 3,
-                  child: AppCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('Expenses', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+  Widget _buildDailyView(String sym) {
+    return Column(children: [
+      // Day navigation
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(children: [
+          IconButton(
+            icon: const Icon(Icons.chevron_left_rounded),
+            onPressed: () => setState(() => _selectedDay = _selectedDay.subtract(const Duration(days: 1))),
+          ),
+          const SizedBox(width: 8),
+          Text(DateFormat('EEEE, dd MMMM yyyy').format(_selectedDay),
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: const Icon(Icons.chevron_right_rounded),
+            onPressed: () {
+              final tomorrow = DateTime.now().add(const Duration(days: 1));
+              if (_selectedDay.isBefore(DateTime(tomorrow.year, tomorrow.month, tomorrow.day))) {
+                setState(() => _selectedDay = _selectedDay.add(const Duration(days: 1)));
+              }
+            },
+          ),
+          const Spacer(),
+          if (DateUtils.isSameDay(_selectedDay, DateTime.now()))
+            const Text('Today', style: TextStyle(color: Colors.green, fontWeight: FontWeight.w700))
+          else
+            TextButton(
+              onPressed: () => setState(() => _selectedDay = DateTime.now()),
+              child: const Text('Go to today'),
+            ),
+        ]),
+      ),
+      Expanded(child: FutureBuilder<List<CashRegisterRow>>(
+        future: ref.watch(dbProvider).registerDao.historyForPeriod(_dayRange.start, _dayRange.end),
+        builder: (_, regSnap) {
+          final registers = regSnap.data ?? [];
+          return FutureBuilder<List<ExpenseRow>>(
+            future: ref.watch(dbProvider).registerDao.expensesForPeriod(_dayRange.start, _dayRange.end),
+            builder: (_, expSnap) {
+              if (!expSnap.hasData) return const Center(child: CircularProgressIndicator());
+              final expenses = expSnap.data!;
+              final totalExpenses = expenses.fold(0.0, (s, e) => s + e.amount);
+
+              // Aggregate register data for this day
+              double totalSales = 0, cashSales = 0, cardSales = 0, walletSales = 0, creditSales = 0;
+              double totalDiscounts = 0, totalTax = 0, openingCashSum = 0;
+              int totalOrders = 0, totalTickets = 0;
+              for (final r in registers) {
+                totalSales += r.totalCashSales + r.totalCardSales + r.totalWalletSales;
+                cashSales += r.totalCashSales;
+                cardSales += r.totalCardSales;
+                walletSales += r.totalWalletSales;
+                creditSales += r.totalCreditSales;
+                totalDiscounts += r.totalDiscounts;
+                totalTax += r.totalTax;
+                openingCashSum += r.openingCash;
+                totalOrders += r.totalOrders;
+                totalTickets += r.totalKitchenTickets;
+              }
+
+              final profit = totalSales - totalExpenses;
+              final byCategory = <String, double>{};
+              for (final e in expenses) {
+                byCategory[e.category] = (byCategory[e.category] ?? 0) + e.amount;
+              }
+              final catEntries = byCategory.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+
+              return SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  // KPI Row
+                  GridView.count(
+                    shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+                    crossAxisCount: 4, childAspectRatio: 2.2, crossAxisSpacing: 12, mainAxisSpacing: 12,
+                    children: [
+                      _ReportKPI('Total Sales', '$sym ${totalSales.toStringAsFixed(0)}', Icons.point_of_sale_rounded, AppColors.orderKitchen),
+                      _ReportKPI('Total Expenses', '$sym ${totalExpenses.toStringAsFixed(0)}', Icons.receipt_long, AppColors.error),
+                      _ReportKPI('Profit / Loss', '$sym ${profit.toStringAsFixed(0)}',
+                        profit >= 0 ? Icons.trending_up_rounded : Icons.trending_down_rounded,
+                        profit >= 0 ? Colors.green : AppColors.error),
+                      _ReportKPI('Registers today', '${registers.length}', Icons.lock_open_rounded, AppColors.orderOpen),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Profit breakdown card
+                  AppCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Investment & Profit Summary', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
                     const SizedBox(height: 12),
-                    if (expenses.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Center(child: Text('No expenses in this period', style: TextStyle(color: context.cs.onSurfaceVariant))),
-                      )
-                    else
-                      ...expenses.map((expense) => _ExpenseRowTile(expense: expense, sym: sym)),
+                    _ProfitBar(label: 'Cash Sales', value: cashSales, color: Colors.green, max: totalSales > 0 ? totalSales : 1, sym: sym),
+                    _ProfitBar(label: 'Card Sales', value: cardSales, color: Colors.blue, max: totalSales > 0 ? totalSales : 1, sym: sym),
+                    _ProfitBar(label: 'Wallet Sales', value: walletSales, color: Colors.purple, max: totalSales > 0 ? totalSales : 1, sym: sym),
+                    _ProfitBar(label: 'Credit Sales', value: creditSales, color: Colors.orange, max: totalSales > 0 ? totalSales : 1, sym: sym),
+                    const Divider(),
+                    _ProfitBar(label: 'Expenses', value: totalExpenses, color: AppColors.error, max: totalSales > 0 ? totalSales : 1, sym: sym),
+                    const SizedBox(height: 4),
+                    Row(children: [
+                      const Spacer(),
+                      Text('Net Profit: ', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: context.cs.onSurfaceVariant)),
+                      Text('$sym ${profit.toStringAsFixed(0)}',
+                        style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: profit >= 0 ? Colors.green : AppColors.error)),
+                    ]),
                   ])),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  flex: 2,
-                  child: AppCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('By category', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 12),
-                    if (categoryRows.isEmpty)
-                      Text('No category data', style: TextStyle(color: context.cs.onSurfaceVariant))
-                    else
-                      ...categoryRows.map((entry) => Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 6),
-                        child: Row(children: [
-                          Container(width: 8, height: 8, decoration: BoxDecoration(color: _categoryColor(entry.key), shape: BoxShape.circle)),
-                          const SizedBox(width: 8),
-                          Expanded(child: Text(entry.key, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                          Text('$sym ${entry.value.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                  const SizedBox(height: 16),
+
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    // Register details
+                    Expanded(flex: 3, child: AppCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('Register Entries', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 8),
+                      if (registers.isEmpty)
+                        Padding(padding: const EdgeInsets.all(20),
+                          child: Center(child: Text('No registers opened this day', style: TextStyle(color: context.cs.onSurfaceVariant))))
+                      else
+                        ...registers.map((r) => _RegisterEntryTile(register: r, sym: sym)),
+                    ]))),
+                    const SizedBox(width: 14),
+                    // Expense list + category breakdown
+                    Expanded(flex: 2, child: Column(children: [
+                      AppCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Row(children: [
+                          Text('Expenses (${expenses.length})', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                          const Spacer(),
+                          Text('$sym ${totalExpenses.toStringAsFixed(0)}', style: TextStyle(fontWeight: FontWeight.w800, color: AppColors.error)),
                         ]),
-                      )),
-                  ])),
-                ),
-              ]),
-            ]),
+                        const SizedBox(height: 10),
+                        if (expenses.isEmpty)
+                          Padding(padding: const EdgeInsets.all(16),
+                            child: Center(child: Text('No expenses today', style: TextStyle(color: context.cs.onSurfaceVariant))))
+                        else
+                          ...expenses.map((e) => _ExpenseRowTile(expense: e, sym: sym)),
+                      ])),
+                      const SizedBox(height: 14),
+                      if (catEntries.isNotEmpty)
+                        AppCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text('By Category', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                          const SizedBox(height: 10),
+                          ...catEntries.map((entry) => Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Row(children: [
+                              Container(width: 8, height: 8, decoration: BoxDecoration(color: _categoryColor(entry.key), shape: BoxShape.circle)),
+                              const SizedBox(width: 8),
+                              Expanded(child: Text(entry.key, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                              Text('$sym ${entry.value.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                            ]),
+                          )),
+                        ])),
+                    ])),
+                  ]),
+                ]),
+              );
+            },
           );
         },
-      ),
-    ));
+      )),
+    ]);
   }
 
-  Future<void> _pickDateRange() async {
-    final picked = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now(),
-      initialDateRange: _range,
-    );
-    if (picked != null) {
-      setState(() => _range = DateTimeRange(
-        start: picked.start,
-        end: picked.end.add(const Duration(hours: 23, minutes: 59)),
-    ));
+  Widget _buildMonthlyView(String sym) {
+    const monthNames = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'];
+
+    return Column(children: [
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(children: [
+          IconButton(
+            icon: const Icon(Icons.chevron_left_rounded),
+            onPressed: () => setState(() {
+              _selectedMonth--;
+              if (_selectedMonth < 1) { _selectedMonth = 12; _selectedYear--; }
+            }),
+          ),
+          const SizedBox(width: 8),
+          Text('${monthNames[_selectedMonth]} $_selectedYear',
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: const Icon(Icons.chevron_right_rounded),
+            onPressed: () {
+              final now = DateTime.now();
+              if (_selectedYear < now.year || (_selectedYear == now.year && _selectedMonth < now.month)) {
+                setState(() {
+                  _selectedMonth++;
+                  if (_selectedMonth > 12) { _selectedMonth = 1; _selectedYear++; }
+                });
+              }
+            },
+          ),
+          const Spacer(),
+          if (_selectedMonth == DateTime.now().month && _selectedYear == DateTime.now().year)
+            const Text('Current month', style: TextStyle(color: Colors.green, fontWeight: FontWeight.w700))
+          else
+            TextButton(
+              onPressed: () => setState(() { _selectedMonth = DateTime.now().month; _selectedYear = DateTime.now().year; }),
+              child: const Text('Current month', style: TextStyle(fontSize: 12)),
+            ),
+        ]),
+      ),
+      Expanded(child: FutureBuilder<List<CashRegisterRow>>(
+        future: ref.watch(dbProvider).registerDao.historyForPeriod(_monthRange.start, _monthRange.end),
+        builder: (_, regSnap) {
+          final registers = regSnap.data ?? [];
+          return FutureBuilder<List<ExpenseRow>>(
+            future: ref.watch(dbProvider).registerDao.expensesForPeriod(_monthRange.start, _monthRange.end),
+            builder: (_, expSnap) {
+              if (!expSnap.hasData) return const Center(child: CircularProgressIndicator());
+              final expenses = expSnap.data!;
+              final totalExpenses = expenses.fold(0.0, (s, e) => s + e.amount);
+
+              double totalSales = 0, cashSales = 0, cardSales = 0, walletSales = 0, creditSales = 0;
+              int totalOrders = 0;
+              for (final r in registers) {
+                totalSales += r.totalCashSales + r.totalCardSales + r.totalWalletSales;
+                cashSales += r.totalCashSales;
+                cardSales += r.totalCardSales;
+                walletSales += r.totalWalletSales;
+                creditSales += r.totalCreditSales;
+                totalOrders += r.totalOrders;
+              }
+              final profit = totalSales - totalExpenses;
+
+              final byCategory = <String, double>{};
+              for (final e in expenses) {
+                byCategory[e.category] = (byCategory[e.category] ?? 0) + e.amount;
+              }
+              final catEntries = byCategory.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+
+              // Group expenses by day
+              final byDay = <String, List<ExpenseRow>>{};
+              for (final e in expenses) {
+                final key = DateFormat('yyyy-MM-dd').format(e.createdAt);
+                byDay.putIfAbsent(key, () => []).add(e);
+              }
+              final dayKeys = byDay.keys.toList()..sort((a, b) => b.compareTo(a));
+
+              // Group days into weeks
+              final daysInMonth = DateTime(_selectedYear, _selectedMonth + 1, 0).day;
+              final List<String> weekRanges = [];
+              int weekStart = 1;
+              for (int d = 1; d <= daysInMonth; d++) {
+                final date = DateTime(_selectedYear, _selectedMonth, d);
+                if (date.weekday == 7 || d == daysInMonth) {
+                  final end = d;
+                  weekRanges.add('Week ${weekRanges.length + 1}: ${monthNames[_selectedMonth].substring(0,3)} $weekStart–$end');
+                  weekStart = d + 1;
+                }
+              }
+
+              // Aggregate sales/expenses per week from register data
+              final weekMap = <String, (double, double, int)>{}; // (sales, expenses, regCount)
+              for (final r in registers) {
+                final day = r.openedAt.day;
+                int wi = 0;
+                int ws = 1;
+                for (int d = 1; d <= daysInMonth; d++) {
+                  final date = DateTime(_selectedYear, _selectedMonth, d);
+                  if (date.weekday == 7 || d == daysInMonth) {
+                    if (day >= ws && day <= d) {
+                      final key = weekRanges[wi];
+                      final prev = weekMap[key];
+                      final regSales = r.totalCashSales + r.totalCardSales + r.totalWalletSales;
+                      weekMap[key] = (
+                        (prev?.$1 ?? 0) + regSales,
+                        (prev?.$2 ?? 0) + r.totalExpenses,
+                        (prev?.$3 ?? 0) + 1,
+                      );
+                      break;
+                    }
+                    ws = d + 1;
+                    wi++;
+                  }
+                }
+              }
+              // Add expense data for days without registers
+              for (final e in expenses) {
+                final day = e.createdAt.day;
+                int wi = 0;
+                int ws = 1;
+                for (int d = 1; d <= daysInMonth; d++) {
+                  final date = DateTime(_selectedYear, _selectedMonth, d);
+                  if (date.weekday == 7 || d == daysInMonth) {
+                    if (day >= ws && day <= d) {
+                      final key = weekRanges[wi];
+                      final prev = weekMap[key];
+                      weekMap[key] = (
+                        prev?.$1 ?? 0,
+                        (prev?.$2 ?? 0) + e.amount,
+                        prev?.$3 ?? 0,
+                      );
+                      break;
+                    }
+                    ws = d + 1;
+                    wi++;
+                  }
+                }
+              }
+              final weekKeys = weekRanges.where((k) => weekMap.containsKey(k)).toList();
+
+              return SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  // KPI row
+                  GridView.count(
+                    shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+                    crossAxisCount: 4, childAspectRatio: 2.2, crossAxisSpacing: 12, mainAxisSpacing: 12,
+                    children: [
+                      _ReportKPI('Month Sales', '$sym ${totalSales.toStringAsFixed(0)}', Icons.point_of_sale_rounded, AppColors.orderKitchen),
+                      _ReportKPI('Month Expenses', '$sym ${totalExpenses.toStringAsFixed(0)}', Icons.receipt_long, AppColors.error),
+                      _ReportKPI('Month Profit', '$sym ${profit.toStringAsFixed(0)}',
+                        profit >= 0 ? Icons.trending_up_rounded : Icons.trending_down_rounded,
+                        profit >= 0 ? Colors.green : AppColors.error),
+                      _ReportKPI('Orders', '$totalOrders', Icons.shopping_cart_rounded, AppColors.orderOpen),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Investment & Profit bar
+                  AppCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Investment & Profit Summary', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 12),
+                    _ProfitBar(label: 'Cash Sales', value: cashSales, color: Colors.green, max: totalSales > 0 ? totalSales : 1, sym: sym),
+                    _ProfitBar(label: 'Card Sales', value: cardSales, color: Colors.blue, max: totalSales > 0 ? totalSales : 1, sym: sym),
+                    _ProfitBar(label: 'Wallet Sales', value: walletSales, color: Colors.purple, max: totalSales > 0 ? totalSales : 1, sym: sym),
+                    _ProfitBar(label: 'Credit Sales', value: creditSales, color: Colors.orange, max: totalSales > 0 ? totalSales : 1, sym: sym),
+                    const Divider(),
+                    _ProfitBar(label: 'Expenses', value: totalExpenses, color: AppColors.error, max: totalSales > 0 ? totalSales : 1, sym: sym),
+                    const SizedBox(height: 4),
+                    Row(children: [
+                      const Spacer(),
+                      Text('Net Profit: ', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: context.cs.onSurfaceVariant)),
+                      Text('$sym ${profit.toStringAsFixed(0)}',
+                        style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: profit >= 0 ? Colors.green : AppColors.error)),
+                    ]),
+                  ])),
+                  const SizedBox(height: 16),
+
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    // Week-by-week breakdown
+                    Expanded(flex: 3, child: AppCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('Week-by-Week Breakdown', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 8),
+                      if (weekKeys.isEmpty)
+                        Padding(padding: const EdgeInsets.all(20),
+                          child: Center(child: Text('No data this month', style: TextStyle(color: context.cs.onSurfaceVariant))))
+                      else
+                        ...weekKeys.map((weekLabel) {
+                          final weekData = weekMap[weekLabel]!;
+                          final weekSales = weekData.$1;
+                          final weekExpenses = weekData.$2;
+                          final weekProfit = weekSales - weekExpenses;
+                          final weekRegCount = weekData.$3;
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: context.bg,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: context.border, width: 0.5),
+                            ),
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Row(children: [
+                                Icon(Icons.date_range_rounded, size: 14, color: context.cs.primary),
+                                const SizedBox(width: 6),
+                                Text(weekLabel, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                                const Spacer(),
+                                Text('Sales: $sym ${weekSales.toStringAsFixed(0)}',
+                                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+                                const SizedBox(width: 12),
+                                Text('Exp: $sym ${weekExpenses.toStringAsFixed(0)}',
+                                  style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant)),
+                                const SizedBox(width: 12),
+                                Text('Profit: $sym ${weekProfit.toStringAsFixed(0)}',
+                                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: weekProfit >= 0 ? Colors.green : AppColors.error)),
+                              ]),
+                              const SizedBox(height: 6),
+                              // Progress bar
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(4),
+                                child: LinearProgressIndicator(
+                                  value: weekSales > 0 ? (weekExpenses / weekSales).clamp(0.0, 1.0) : 0,
+                                  backgroundColor: Colors.green.withAlpha(30),
+                                  valueColor: AlwaysStoppedAnimation(weekExpenses > weekSales ? AppColors.error : Colors.green),
+                                  minHeight: 8,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text('Registers: $weekRegCount', style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+                            ]),
+                          );
+                        }),
+                    ]))),
+                    const SizedBox(width: 14),
+                    // Category breakdown
+                    Expanded(flex: 2, child: AppCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('By Category', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 10),
+                      if (catEntries.isEmpty)
+                        Text('No category data', style: TextStyle(color: context.cs.onSurfaceVariant))
+                      else
+                        ...catEntries.map((entry) => Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(children: [
+                            Container(width: 8, height: 8, decoration: BoxDecoration(color: _categoryColor(entry.key), shape: BoxShape.circle)),
+                            const SizedBox(width: 8),
+                            Expanded(child: Text(entry.key, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                            Text('$sym ${entry.value.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                          ]),
+                        )),
+                    ]))),
+                  ]),
+                ]),
+              );
+            },
+          );
+        },
+      )),
+    ]);
   }
-}
 
   void _showAddExpenseDialog() {
     final amountCtrl = TextEditingController();
@@ -1244,8 +1794,7 @@ class _ExpenseTrackerScreenState extends ConsumerState<ExpenseTrackerScreen> {
         Align(
           alignment: Alignment.centerLeft,
           child: Wrap(
-            spacing: 6,
-            runSpacing: 6,
+            spacing: 6, runSpacing: 6,
             children: _categories.map((category) => ActionChip(
               label: Text(category),
               visualDensity: VisualDensity.compact,
@@ -1264,8 +1813,7 @@ class _ExpenseTrackerScreenState extends ConsumerState<ExpenseTrackerScreen> {
         const SizedBox(height: 12),
         TextField(
           controller: descCtrl,
-          minLines: 2,
-          maxLines: 3,
+          minLines: 2, maxLines: 3,
           decoration: const InputDecoration(labelText: 'Description / note'),
         ),
       ])),
@@ -1279,8 +1827,7 @@ class _ExpenseTrackerScreenState extends ConsumerState<ExpenseTrackerScreen> {
           onPressed: saving ? null : () async {
             final amount = double.tryParse(amountCtrl.text) ?? 0;
             final category = categoryCtrl.text.trim();
-            if (category.isEmpty) return;
-            if (amount <= 0) return;
+            if (category.isEmpty || amount <= 0) return;
             ss(() => saving = true);
             await _saveExpense(category, amount, descCtrl.text.trim());
             if (ctx.mounted) Navigator.pop(ctx);
@@ -1318,16 +1865,100 @@ class _ExpenseTrackerScreenState extends ConsumerState<ExpenseTrackerScreen> {
 
   Color _categoryColor(String category) {
     final colors = [
-      AppColors.error,
-      AppColors.orderOpen,
-      AppColors.orderKitchen,
-      AppColors.orderReady,
-      const Color(0xFF7C3AED),
-      const Color(0xFF0EA5E9),
-      const Color(0xFFDB2777),
+      AppColors.error, AppColors.orderOpen, AppColors.orderKitchen, AppColors.orderReady,
+      const Color(0xFF7C3AED), const Color(0xFF0EA5E9), const Color(0xFFDB2777),
     ];
     return colors[category.hashCode.abs() % colors.length];
   }
+}
+
+class _ProfitBar extends StatelessWidget {
+  const _ProfitBar({required this.label, required this.value, required this.color, required this.max, required this.sym});
+  final String label, sym;
+  final double value, max;
+  final Color color;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 3),
+    child: Row(children: [
+      SizedBox(width: 100, child: Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
+      const SizedBox(width: 8),
+      Expanded(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value: max > 0 ? (value / max).clamp(0.0, 1.0) : 0,
+            backgroundColor: color.withAlpha(30),
+            valueColor: AlwaysStoppedAnimation(color),
+            minHeight: 10,
+          ),
+        ),
+      ),
+      const SizedBox(width: 10),
+      Text('$sym ${value.toStringAsFixed(0)}', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: color)),
+    ]),
+  );
+}
+
+class _RegisterEntryTile extends StatelessWidget {
+  const _RegisterEntryTile({required this.register, required this.sym});
+  final CashRegisterRow register;
+  final String sym;
+
+  @override
+  Widget build(BuildContext context) {
+    final isOpen = register.status == 'open';
+    final sales = register.totalCashSales + register.totalCardSales + register.totalWalletSales;
+    final netCash = register.closingCash - register.openingCash;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: context.bg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isOpen ? Colors.green.withAlpha(80) : context.border,
+          width: isOpen ? 1.0 : 0.5,
+        ),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(isOpen ? Icons.lock_open_rounded : Icons.lock_rounded,
+            size: 16, color: isOpen ? Colors.green : Colors.grey),
+          const SizedBox(width: 6),
+          Text('${isOpen ? 'Open' : 'Closed'} Register #${register.id}',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: isOpen ? Colors.green : null)),
+          const Spacer(),
+          Text(DateFormat('h:mm a').format(register.openedAt),
+            style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+          if (register.closedAt != null) ...[
+            const Text(' — ', style: TextStyle(fontSize: 11)),
+            Text(DateFormat('h:mm a').format(register.closedAt!),
+              style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+          ],
+        ]),
+        const SizedBox(height: 8),
+        Wrap(spacing: 16, runSpacing: 4, children: [
+          _RegMiniStat('Opening', '$sym ${register.openingCash.toStringAsFixed(0)}'),
+          _RegMiniStat('Sales', '$sym ${sales.toStringAsFixed(0)}'),
+          _RegMiniStat('Expenses', '$sym ${register.totalExpenses.toStringAsFixed(0)}'),
+          _RegMiniStat('Orders', '${register.totalOrders}'),
+          _RegMiniStat('Voided', '${register.totalVoids}'),
+        ]),
+      ]),
+    );
+  }
+}
+
+class _RegMiniStat extends StatelessWidget {
+  const _RegMiniStat(this.label, this.value);
+  final String label, value;
+  @override
+  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Text(label, style: TextStyle(fontSize: 10, color: context.cs.onSurfaceVariant)),
+    Text(value, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+  ]);
 }
 
 class _ExpenseRowTile extends StatelessWidget {
@@ -1338,33 +1969,33 @@ class _ExpenseRowTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     margin: const EdgeInsets.only(bottom: 8),
-    padding: const EdgeInsets.all(12),
+    padding: const EdgeInsets.all(10),
     decoration: BoxDecoration(
       color: context.bg,
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(8),
       border: Border.all(color: context.border, width: 0.5),
     ),
     child: Row(children: [
       Container(
-        width: 38,
-        height: 38,
+        width: 34, height: 34,
         decoration: BoxDecoration(color: AppColors.error.withAlpha(18), shape: BoxShape.circle),
-        child: const Icon(Icons.receipt_long_rounded, color: AppColors.error, size: 20),
+        child: const Icon(Icons.receipt_long_rounded, color: AppColors.error, size: 18),
       ),
-      const SizedBox(width: 12),
+      const SizedBox(width: 10),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Text(expense.category, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+          Text(expense.category, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
           const SizedBox(width: 8),
-          Text(DateFormat('dd/MM/yyyy h:mm a').format(expense.createdAt), style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+          Text(DateFormat('h:mm a').format(expense.createdAt), style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
         ]),
-        const SizedBox(height: 3),
-        Text(expense.description, style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant), maxLines: 2, overflow: TextOverflow.ellipsis),
-        const SizedBox(height: 3),
-        Text('Paid by ${expense.paidBy}', style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+        if (expense.description.isNotEmpty && expense.description != expense.category)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(expense.description, style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant), maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
       ])),
-      const SizedBox(width: 12),
-      Text('$sym ${expense.amount.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15, color: AppColors.error)),
+      const SizedBox(width: 8),
+      Text('$sym ${expense.amount.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: AppColors.error)),
     ]),
   );
 }
@@ -1494,12 +2125,31 @@ class _OpenRegisterPanel extends ConsumerWidget {
           crossAxisSpacing: 12, mainAxisSpacing: 12,
           children: [
             _ReportKPI('Total sales', '$sym ${register.totalSales.toStringAsFixed(0)}', Icons.trending_up, AppColors.orderOpen),
-            _ReportKPI('Total orders', '${register.totalOrders}', Icons.receipt_long, AppColors.orderKitchen),
+            _ReportKPI('Total expenses', '$sym ${register.totalExpenses.toStringAsFixed(0)}', Icons.receipt_long, AppColors.error),
             _ReportKPI('Kitchen tickets', '${register.totalKitchenTickets}', Icons.kitchen, const Color(0xFF7C3AED)),
             _ReportKPI('Expected cash', '$sym ${register.expectedCash.toStringAsFixed(0)}', Icons.payments, Colors.green),
           ],
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 16),
+        // Daily investment & profit bar
+        AppCard(child: Row(children: [
+          Expanded(child: _ProfitBar(label: 'Cash Sales', value: register.totalCashSales, color: Colors.green,
+            max: register.totalSales > 0 ? register.totalSales : 1, sym: sym)),
+          const SizedBox(width: 12),
+          Expanded(child: _ProfitBar(label: 'Card Sales', value: register.totalCardSales, color: Colors.blue,
+            max: register.totalSales > 0 ? register.totalSales : 1, sym: sym)),
+          const SizedBox(width: 12),
+          Expanded(child: _ProfitBar(label: 'Expenses', value: register.totalExpenses, color: AppColors.error,
+            max: register.totalSales > 0 ? register.totalSales : 1, sym: sym)),
+          const SizedBox(width: 12),
+          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            Text('Profit', style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+            Text('$sym ${(register.totalSales - register.totalExpenses).toStringAsFixed(0)}',
+              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16,
+                color: (register.totalSales - register.totalExpenses) >= 0 ? Colors.green : AppColors.error)),
+          ]),
+        ])),
+        const SizedBox(height: 16),
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           // Cash operations
           Expanded(child: AppCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1854,7 +2504,7 @@ class _ReceiptTaxSettings extends ConsumerStatefulWidget {
 }
 
 class _ReceiptTaxSettingsState extends ConsumerState<_ReceiptTaxSettings> {
-  late TextEditingController _tax, _svc, _svcFixed, _sym;
+  late TextEditingController _tax, _svc, _svcFixed, _deliv, _sym;
   late bool _autoKitchen, _autoPrint;
 
   @override
@@ -1863,12 +2513,13 @@ class _ReceiptTaxSettingsState extends ConsumerState<_ReceiptTaxSettings> {
     _tax  = TextEditingController(text: widget.settings.taxPercent.toStringAsFixed(0));
     _svc  = TextEditingController(text: widget.settings.serviceChargePercent.toStringAsFixed(0));
     _svcFixed = TextEditingController(text: widget.settings.serviceChargeFixed.toStringAsFixed(0));
+    _deliv = TextEditingController(text: widget.settings.defaultDeliveryCharges.toStringAsFixed(0));
     _sym  = TextEditingController(text: widget.settings.currencySymbol);
     _autoKitchen = widget.settings.autoKitchenPrint;
     _autoPrint   = widget.settings.autoPrintBillOnPay;
   }
 
-  @override void dispose() { _tax.dispose(); _svc.dispose(); _svcFixed.dispose(); _sym.dispose(); super.dispose(); }
+  @override void dispose() { _tax.dispose(); _svc.dispose(); _svcFixed.dispose(); _deliv.dispose(); _sym.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) => SingleChildScrollView(
@@ -1888,6 +2539,10 @@ class _ReceiptTaxSettingsState extends ConsumerState<_ReceiptTaxSettings> {
         Row(children: [
           const SizedBox(width: 12),
           Expanded(child: TextField(controller: _sym, decoration: const InputDecoration(labelText: 'Currency symbol (e.g. Rs'))),
+        ]),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(child: TextField(controller: _deliv, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Default delivery charges'))),
         ]),
         const SizedBox(height: 14),
         const Row(children: [
@@ -1918,6 +2573,7 @@ class _ReceiptTaxSettingsState extends ConsumerState<_ReceiptTaxSettings> {
             taxPercent: double.tryParse(_tax.text) ?? 17,
             serviceChargePercent: double.tryParse(_svc.text) ?? 0,
             serviceChargeFixed: double.tryParse(_svcFixed.text) ?? 0,
+            defaultDeliveryCharges: double.tryParse(_deliv.text) ?? 150,
             currencySymbol: _sym.text,
             receiptWidth: 80,
             autoKitchenPrint: _autoKitchen,

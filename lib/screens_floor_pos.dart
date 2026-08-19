@@ -138,16 +138,20 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     color: isDark ? AppColors.darkCard : Colors.white,
                     child: Row(children: [
-                      Text('${tables.length} tables', style: const TextStyle(fontSize: 12)),
+                      Text('${tables.length} ${tables.isNotEmpty && tables.first.shape == 'rider' ? 'riders' : 'tables'}', style: const TextStyle(fontSize: 12)),
                       const SizedBox(width: 16),
                       _FloorLegend(AppColors.tableAvailable, 'Available'),
                       const SizedBox(width: 12),
-                      _FloorLegend(AppColors.tableOccupied, 'Occupied'),
+                      _FloorLegend(AppColors.tableOccupied, tables.isNotEmpty && tables.first.shape == 'rider' ? 'On Delivery' : 'Occupied'),
                       const SizedBox(width: 12),
                       _FloorLegend(AppColors.tableReserved, 'Reserved'),
                       const Spacer(),
                       if (_editMode) Text('Drag tables to reposition', style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
-                      if (!_editMode) Text('Tap a table to open order terminal', style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+                      if (!_editMode) Text(
+                        tables.isNotEmpty && tables.first.shape == 'rider'
+                          ? 'Tap a rider to start a delivery order'
+                          : 'Tap a table to open order terminal',
+                        style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
                     ]),
                   ),
                   // Canvas
@@ -182,7 +186,11 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
   void _onTableTap(TableEntity table) {
     if (_editMode) return;
     if (table.isAvailable) {
-      _showGuestDialog(table);
+      if (table.shape == 'rider') {
+        _showDeliveryDialog(table);
+      } else {
+        _showGuestDialog(table);
+      }
     } else {
       context.go('/pos/${table.id}');
     }
@@ -264,6 +272,84 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
     )));
   }
 
+  void _showDeliveryDialog(TableEntity rider) {
+    final waiterCtrl = TextEditingController(text: ref.read(authProvider).user?.name ?? '');
+    final deliveryChargesCtrl = TextEditingController(text: '${ref.read(settingsProvider).defaultDeliveryCharges.toStringAsFixed(0)}');
+    final staffList = ref.read(staffProvider).valueOrNull ?? [];
+
+    showDialog(context: context, builder: (_) => StatefulBuilder(builder: (ctx, ss) => AlertDialog(
+      title: Row(children: [
+        const Icon(Icons.delivery_dining_rounded, size: 22),
+        const SizedBox(width: 10),
+        Text('New Delivery - ${rider.name}'),
+      ]),
+      content: SizedBox(width: 380, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Waiter / Server name:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(
+            child: TextField(
+              controller: waiterCtrl,
+              textCapitalization: TextCapitalization.words,
+              decoration: InputDecoration(
+                hintText: 'e.g. Ahmed',
+                prefixIcon: const Icon(Icons.badge_outlined, size: 18),
+                isDense: true,
+              ),
+              onChanged: (_) => ss(() {}),
+            ),
+          ),
+          if (staffList.isNotEmpty) ...[
+            const SizedBox(width: 8),
+            PopupMenuButton<String>(
+              tooltip: 'Pick from staff',
+              icon: const Icon(Icons.people_alt_outlined),
+              onSelected: (name) => ss(() => waiterCtrl.text = name),
+              itemBuilder: (_) => staffList.map((u) => PopupMenuItem(
+                value: u.name,
+                child: Row(children: [
+                  CircleAvatar(radius: 14, child: Text(u.name[0].toUpperCase(), style: const TextStyle(fontSize: 12))),
+                  const SizedBox(width: 8),
+                  Text(u.name),
+                ]),
+              )).toList(),
+            ),
+          ],
+        ]),
+        const SizedBox(height: 20),
+        const Text('Delivery charges:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        TextField(
+          controller: deliveryChargesCtrl,
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(
+            hintText: '0',
+            prefixIcon: const Icon(Icons.local_shipping_outlined, size: 18),
+            isDense: true,
+            prefixText: '${ref.read(settingsProvider).currencySymbol} ',
+          ),
+        ),
+      ])),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () async {
+            Navigator.pop(ctx);
+            final waiterName = waiterCtrl.text.trim();
+            final charges = double.tryParse(deliveryChargesCtrl.text.trim()) ?? 0;
+            await ref.read(posProvider(rider.id).notifier).openTableWithWaiter(
+              1, waiterName: waiterName, orderType: 'delivery',
+              riderId: rider.id, riderName: rider.name,
+              deliveryCharges: charges,
+            );
+            if (mounted) context.go('/pos/${rider.id}');
+          },
+          child: const Text('Start Delivery'),
+        ),
+      ],
+    )));
+  }
+
   Future<void> _addFloor() async {
     final nameCtrl = TextEditingController();
     final prefixCtrl = TextEditingController(text: 'T');
@@ -339,16 +425,15 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
     }
     final tables = await db.tableDao.watchByFloor(floor.id).first;
     if (tables.isNotEmpty) {
+      bool hasAnyHistory = false;
       for (final t in tables) {
-        if (await db.orderDao.hasOrdersForTable(t.id)) {
-          if (mounted) showError(context,
-              'Floor "${floor.name}" contains tables with order history and cannot be deleted.');
-          return;
-        }
+        if (await db.orderDao.hasOrdersForTable(t.id)) { hasAnyHistory = true; break; }
       }
       final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
         title: const Text('Delete floor'),
-        content: Text('Delete "${floor.name}"? Its ${tables.length} table(s) will also be deleted.'),
+        content: Text(hasAnyHistory
+          ? 'Delete "${floor.name}"? Its ${tables.length} table(s) and all order history will be removed. This cannot be undone.'
+          : 'Delete "${floor.name}"? Its ${tables.length} table(s) will also be deleted.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           FilledButton(
@@ -360,6 +445,13 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
       ));
       if (ok != true) return;
       for (final t in tables) {
+        final orderIds = (await (db.select(db.orders)..where((x) => x.tableId.equals(t.id))).get()).map((o) => o.id).toList();
+        for (final oid in orderIds) {
+          await (db.delete(db.invoices)..where((x) => x.orderId.equals(oid))).go();
+        }
+        if (orderIds.isNotEmpty) {
+          await (db.delete(db.orders)..where((x) => x.tableId.equals(t.id))).go();
+        }
         await (db.delete(db.restaurantTables)..where((x) => x.id.equals(t.id))).go();
       }
     } else {
@@ -534,7 +626,11 @@ class _TableWidgetState extends ConsumerState<_TableWidget> with SingleTickerPro
           ),
           child: Stack(fit: StackFit.expand, alignment: Alignment.center, children: [
             Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Icon(t.isOccupied ? Icons.person_rounded : Icons.table_restaurant_rounded, color: c, size: 18),
+              Icon(
+                t.shape == 'rider'
+                    ? (t.isOccupied ? Icons.delivery_dining_rounded : Icons.delivery_dining_outlined)
+                    : (t.isOccupied ? Icons.person_rounded : Icons.table_restaurant_rounded),
+                color: c, size: 18),
               const SizedBox(height: 3),
               Text(t.name, style: TextStyle(color: c, fontWeight: FontWeight.w800, fontSize: 13)),
               if (t.isOccupied) ...[
@@ -588,13 +684,12 @@ class _TableWidgetState extends ConsumerState<_TableWidget> with SingleTickerPro
       return;
     }
     final db = ref.read(dbProvider);
-    if (await db.orderDao.hasOrdersForTable(table.id)) {
-      showError(context, 'Table ${table.name} has order history and cannot be deleted.');
-      return;
-    }
+    final hasHistory = await db.orderDao.hasOrdersForTable(table.id);
     final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
       title: const Text('Delete table'),
-      content: Text('Delete "${table.name}"? This cannot be undone.'),
+      content: Text(hasHistory
+        ? 'Delete "${table.name}"? This table has order history that will also be removed. This cannot be undone.'
+        : 'Delete "${table.name}"? This cannot be undone.'),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
         FilledButton(
@@ -605,6 +700,13 @@ class _TableWidgetState extends ConsumerState<_TableWidget> with SingleTickerPro
       ],
     ));
     if (ok != true) return;
+    if (hasHistory) {
+      final orderIds = (await (db.select(db.orders)..where((x) => x.tableId.equals(table.id))).get()).map((o) => o.id).toList();
+      for (final oid in orderIds) {
+        await (db.delete(db.invoices)..where((x) => x.orderId.equals(oid))).go();
+      }
+      await (db.delete(db.orders)..where((x) => x.tableId.equals(table.id))).go();
+    }
     await (db.delete(db.restaurantTables)..where((x) => x.id.equals(table.id))).go();
   }
 
@@ -679,6 +781,7 @@ class _POSScreenState extends ConsumerState<POSScreen> {
   final _searchCtrl = TextEditingController();
   bool _showSearch = false;
   bool _showDeals = false;
+  bool _printing = false;
 
   @override
   void dispose() { _searchCtrl.dispose(); super.dispose(); }
@@ -700,9 +803,12 @@ class _POSScreenState extends ConsumerState<POSScreen> {
           onPressed: () => context.go('/floor'),
         ),
         title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Table ${_getTableName()}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+          Text(_getTableName(), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
           if (order != null)
-            Text('#${order.orderNumber} · ${order.waiterName} · ${order.guestCount} guests',
+            Text(
+              order.isDelivery
+                ? '#${order.orderNumber} · ${order.riderName ?? "Rider"} · Delivery'
+                : '#${order.orderNumber} · ${order.waiterName} · ${order.guestCount} guests',
               style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant, fontWeight: FontWeight.w400)),
         ]),
         actions: [
@@ -733,11 +839,14 @@ class _POSScreenState extends ConsumerState<POSScreen> {
                 const PopupMenuItem(value: 'void', child: Row(children: [Icon(Icons.cancel_outlined, color: Colors.red, size: 18), SizedBox(width: 8), Text('Void order', style: TextStyle(color: Colors.red))])),
                 const PopupMenuItem(value: 'transfer', child: Row(children: [Icon(Icons.swap_horiz, size: 18), SizedBox(width: 8), Text('Transfer table')])),
                 const PopupMenuItem(value: 'a4', child: Row(children: [Icon(Icons.picture_as_pdf_outlined, size: 18), SizedBox(width: 8), Text('Print A4 invoice')])),
+                if (order.isDelivery)
+                  const PopupMenuItem(value: 'delivery_charges', child: Row(children: [Icon(Icons.local_shipping_outlined, size: 18), SizedBox(width: 8), Text('Edit delivery charges')])),
               ],
               onSelected: (v) async {
                 if (v == 'void') await _voidOrder();
                 if (v == 'transfer') await _transferTable();
                 if (v == 'a4' && order != null) _printA4();
+                if (v == 'delivery_charges') _showDeliveryChargesDialog();
               },
             ),
           ],
@@ -794,9 +903,13 @@ class _POSScreenState extends ConsumerState<POSScreen> {
   }
 
   String _getTableName() {
+    final order = ref.read(posProvider(widget.tableId)).valueOrNull;
+    if (order != null && order.isDelivery) {
+      return order.riderName ?? order.tableName;
+    }
     final tableAsync = ref.read(tablesProvider);
     final table = tableAsync.valueOrNull?.firstWhere((t) => t.id == widget.tableId, orElse: () => TableEntity(id: widget.tableId, floorId: 0, name: 'T${widget.tableId}', capacity: 4, status: TableStatus.occupied));
-    return table?.name ?? 'Table';
+    return 'Table ${table?.name ?? 'Table'}';
   }
 
   Color _hexColor(String hex) {
@@ -847,12 +960,13 @@ class _POSScreenState extends ConsumerState<POSScreen> {
   }
 
   Future<void> _sendToKitchen() async {
+    if (_printing) return;
     final order = ref.read(posProvider(widget.tableId)).valueOrNull;
     if (order == null) return;
+    _printing = true;
+    try {
     await ref.read(posProvider(widget.tableId).notifier).sendToKitchen();
     // Print kitchen ticket (respects auto-print setting).
-    // Ticket number comes from the current register session, so it
-    // restarts from 1 whenever a new register is opened.
     final settings = ref.read(settingsProvider);
     if (settings.autoKitchenPrint) {
       try {
@@ -865,11 +979,15 @@ class _POSScreenState extends ConsumerState<POSScreen> {
     } else {
       if (mounted) showSuccess(context, 'Sent to kitchen');
     }
+    } finally { _printing = false; }
   }
 
   Future<void> _printBill() async {
+    if (_printing) return;
     final order = ref.read(posProvider(widget.tableId)).valueOrNull;
     if (order == null) return;
+    _printing = true;
+    try {
     await ref.read(posProvider(widget.tableId).notifier).printProformaBill();
     try {
       await PrintService.instance.printProformaBill(order);
@@ -878,6 +996,7 @@ class _POSScreenState extends ConsumerState<POSScreen> {
     } catch (e) {
       if (mounted) showError(context, e is PrintException ? e.message : 'Print failed: $e');
     }
+    } finally { _printing = false; }
   }
 
   Future<void> _transferTable() async {
@@ -966,6 +1085,7 @@ class _POSScreenState extends ConsumerState<POSScreen> {
       orderNumber: r.orderNumber, tableName: r.tableNameCol, waiterName: r.waiterName,
       items: o.activeItems, subtotal: r.subtotal, discountValue: r.discountValue,
       taxValue: r.taxValue, serviceChargeValue: r.serviceChargeValue,
+      deliveryCharges: r.deliveryCharges,
       grandTotal: r.grandTotal, amountPaid: r.amountPaid, changeAmount: r.changeAmount,
       paymentMethod: PaymentMethod.values.firstWhere((m) => m.name == r.paymentMethod, orElse: () => PaymentMethod.cash),
       status: BillStatus.final_, createdAt: r.createdAt, paymentSplits: splits,
@@ -1012,6 +1132,7 @@ class _POSScreenState extends ConsumerState<POSScreen> {
   }
 
   void _showPaymentDialog() {
+    if (_printing) return;
     final order = ref.read(posProvider(widget.tableId)).valueOrNull;
     if (order == null) return;
     showDialog(
@@ -1056,6 +1177,36 @@ class _POSScreenState extends ConsumerState<POSScreen> {
       await ref.read(posProvider(widget.tableId).notifier).voidOrder();
       if (mounted) { showSuccess(context, 'Order voided'); context.go('/floor'); }
     }
+  }
+
+  void _showDeliveryChargesDialog() {
+    final order = ref.read(posProvider(widget.tableId)).valueOrNull;
+    if (order == null) return;
+    final ctrl = TextEditingController(text: order.deliveryCharges.toStringAsFixed(0));
+    showDialog(context: context, builder: (_) => AlertDialog(
+      title: const Text('Delivery Charges'),
+      content: TextField(
+        controller: ctrl,
+        keyboardType: TextInputType.number,
+        autofocus: true,
+        decoration: InputDecoration(
+          labelText: 'Delivery charges',
+          prefixIcon: const Icon(Icons.local_shipping_outlined, size: 18),
+          prefixText: '${ref.read(settingsProvider).currencySymbol} ',
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () {
+            final charges = double.tryParse(ctrl.text) ?? 0;
+            ref.read(posProvider(widget.tableId).notifier).updateDeliveryCharges(charges);
+            Navigator.pop(context);
+          },
+          child: const Text('Save'),
+        ),
+      ],
+    ));
   }
 }
 
@@ -1528,6 +1679,7 @@ class _CartPanel extends ConsumerWidget {
               if (o.taxValue > 0) _SummaryRow('GST (${o.taxPercent.toStringAsFixed(0)}%)', o.taxValue, settings.currencySymbol),
               if (o.serviceChargeFixed > 0) _SummaryRow('Service Charge', o.serviceChargeFixed, settings.currencySymbol),
               if (o.serviceChargePercentValue > 0) _SummaryRow('Service (${o.serviceChargePercent.toStringAsFixed(0)}%)', o.serviceChargePercentValue, settings.currencySymbol),
+              if (o.deliveryCharges > 0) _SummaryRow('Delivery Charges', o.deliveryCharges, settings.currencySymbol),
               const Divider(height: 12),
               Row(children: [
                 Text('Total', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),

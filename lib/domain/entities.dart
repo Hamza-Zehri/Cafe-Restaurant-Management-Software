@@ -85,6 +85,7 @@ class SalaryRecord {
 
 // ── Floor & Tables ───────────────────────────────────
 enum TableStatus { available, occupied, reserved, cleaning }
+enum OrderType { dineIn, delivery, takeaway }
 
 class FloorEntity {
   const FloorEntity({required this.id, required this.name, this.prefix = 'T', required this.sortOrder});
@@ -254,6 +255,7 @@ class OrderEntity {
     required this.items, required this.status,
     this.discountPercent = 0, this.discountAmount = 0,
     this.taxPercent = 0, this.serviceChargePercent = 0, this.serviceChargeFixed = 0,
+    this.deliveryCharges = 0, this.orderType = 'dine_in', this.riderId, this.riderName,
     this.notes = '', required this.createdAt, this.paidAt,
     this.kitchenTicketCount = 0, this.guestCount = 1,
   });
@@ -270,6 +272,10 @@ class OrderEntity {
   final double taxPercent;
   final double serviceChargePercent;
   final double serviceChargeFixed;
+  final double deliveryCharges;
+  final String orderType;
+  final int? riderId;
+  final String? riderName;
   final String notes;
   final DateTime createdAt;
   final DateTime? paidAt;
@@ -283,8 +289,10 @@ class OrderEntity {
   double get taxValue => afterDiscount * taxPercent / 100;
   double get serviceChargePercentValue => afterDiscount * serviceChargePercent / 100;
   double get serviceChargeValue => serviceChargeFixed + serviceChargePercentValue;
-  double get grandTotal => afterDiscount + taxValue + serviceChargeValue;
+  double get grandTotal => afterDiscount + taxValue + serviceChargeValue + deliveryCharges;
   int get totalItems => activeItems.fold(0, (s, i) => s + i.quantity);
+
+  bool get isDelivery => orderType == 'delivery';
 
   // Items pending kitchen
   List<OrderItemEntity> get pendingKitchenItems =>
@@ -293,6 +301,7 @@ class OrderEntity {
   OrderEntity copyWith({
     List<OrderItemEntity>? items, OrderStatus? status,
     double? discountPercent, double? discountAmount,
+    double? deliveryCharges, String? orderType, int? riderId, String? riderName,
     String? notes, int? kitchenTicketCount, DateTime? paidAt,
   }) => OrderEntity(
     id: id, orderNumber: orderNumber, tableId: tableId, tableName: tableName,
@@ -300,6 +309,10 @@ class OrderEntity {
     items: items ?? this.items, status: status ?? this.status,
     discountPercent: discountPercent ?? this.discountPercent,
     discountAmount: discountAmount ?? this.discountAmount,
+    deliveryCharges: deliveryCharges ?? this.deliveryCharges,
+    orderType: orderType ?? this.orderType,
+    riderId: riderId ?? this.riderId,
+    riderName: riderName ?? this.riderName,
     taxPercent: taxPercent, serviceChargePercent: serviceChargePercent,
     notes: notes ?? this.notes, createdAt: createdAt, paidAt: paidAt ?? this.paidAt,
     kitchenTicketCount: kitchenTicketCount ?? this.kitchenTicketCount,
@@ -324,6 +337,7 @@ class InvoiceEntity {
     required this.waiterName, required this.items,
     required this.subtotal, required this.discountValue,
     required this.taxValue, required this.serviceChargeValue,
+    this.deliveryCharges = 0, this.orderType = 'dine_in', this.riderName,
     required this.grandTotal, required this.amountPaid,
     required this.paymentMethod, required this.status,
     required this.createdAt, this.customerId,
@@ -341,6 +355,9 @@ class InvoiceEntity {
   final double discountValue;
   final double taxValue;
   final double serviceChargeValue;
+  final double deliveryCharges;
+  final String orderType;
+  final String? riderName;
   final double grandTotal;
   final double amountPaid;
   final double changeAmount;
@@ -457,6 +474,7 @@ class RestaurantSettings {
     this.taxPercent = 17.0,
     this.serviceChargePercent = 0.0,
     this.serviceChargeFixed = 0.0,
+    this.defaultDeliveryCharges = 150.0,
     this.currencySymbol = 'Rs',
     this.receiptWidth = 80,
     this.printerMode = 'pdf',
@@ -481,6 +499,7 @@ class RestaurantSettings {
   final double taxPercent;
   final double serviceChargePercent;
   final double serviceChargeFixed;
+  final double defaultDeliveryCharges;
   final String currencySymbol;
   final int receiptWidth;
   final String printerMode;
@@ -497,7 +516,8 @@ class RestaurantSettings {
   RestaurantSettings copyWith({
     String? name, String? address, String? phone, String? email,
     String? taxNumber, String? footerMessage, String? logoPath,
-    double? taxPercent, double? serviceChargePercent, double? serviceChargeFixed, String? currencySymbol,
+    double? taxPercent, double? serviceChargePercent, double? serviceChargeFixed,
+    double? defaultDeliveryCharges, String? currencySymbol,
     int? receiptWidth, bool? autoKitchenPrint, bool? autoPrintBillOnPay,
     String? printerMode, String? selectedPrinterName,
     bool? autoBackupEnabled, String? autoBackupInterval, String? autoBackupDestFolder,
@@ -511,6 +531,7 @@ class RestaurantSettings {
     taxPercent: taxPercent ?? this.taxPercent,
     serviceChargePercent: serviceChargePercent ?? this.serviceChargePercent,
     serviceChargeFixed: serviceChargeFixed ?? this.serviceChargeFixed,
+    defaultDeliveryCharges: defaultDeliveryCharges ?? this.defaultDeliveryCharges,
     currencySymbol: currencySymbol ?? this.currencySymbol,
     receiptWidth: receiptWidth ?? this.receiptWidth,
     printerMode: printerMode ?? this.printerMode,
