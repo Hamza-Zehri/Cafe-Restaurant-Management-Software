@@ -207,7 +207,7 @@ class ThermalLayout {
             maxLines: 1, overflow: pw.TextOverflow.clip),
       );
     }
-    // Name is long — amount on its own line below
+    // Name is long — amount centered below
     return pw.SizedBox(
       width: contentWidth,
       child: pw.Column(
@@ -216,10 +216,11 @@ class ThermalLayout {
           pw.Text(name,
               maxLines: 1, overflow: pw.TextOverflow.clip,
               style: pw.TextStyle(font: font, fontSize: size)),
+          pw.SizedBox(height: 1),
           pw.SizedBox(
             width: contentWidth,
             child: pw.Text(value,
-                textAlign: pw.TextAlign.right,
+                textAlign: pw.TextAlign.center,
                 style: pw.TextStyle(font: vf, fontSize: size)),
           ),
         ],
