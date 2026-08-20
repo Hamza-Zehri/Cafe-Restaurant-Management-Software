@@ -2085,7 +2085,7 @@ class _PaymentDialogState extends ConsumerState<_PaymentDialog> {
             ),
           ).toList()),
         ],
-        if (_method == PaymentMethod.credit) ...[
+          if (_method == PaymentMethod.credit) ...[
           const SizedBox(height: 16),
           Text('Customer Details (Credit)', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
@@ -2105,8 +2105,19 @@ class _PaymentDialogState extends ConsumerState<_PaymentDialog> {
             decoration: const InputDecoration(
               labelText: 'Phone Number *',
               prefixIcon: Icon(Icons.phone_outlined),
+              hintText: 'Existing customer auto-fills name',
             ),
-            onChanged: (_) => setState(() {}),
+            onChanged: (val) async {
+              final phone = val.trim();
+              if (phone.length >= 5) {
+                final db = ref.read(dbProvider);
+                final existing = await db.customerDao.byPhone(phone);
+                if (existing != null && _custNameCtrl.text.trim() != existing.name) {
+                  _custNameCtrl.text = existing.name;
+                  if (mounted) setState(() {});
+                }
+              }
+            },
           ),
         ],
         const SizedBox(height: 24),

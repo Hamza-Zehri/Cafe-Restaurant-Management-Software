@@ -538,6 +538,14 @@ class CustomerDao extends DatabaseAccessor<AppDatabase> with _$CustomerDaoMixin 
   Future<List<CreditLedgerRow>> ledger(int customerId) =>
     (select(creditLedger)..where((l) => l.customerId.equals(customerId))..orderBy([(l) => OrderingTerm.desc(l.createdAt)])).get();
   Future<void> insertLedger(CreditLedgerCompanion c) => into(creditLedger).insert(c);
+  Future<void> deleteCustomer(int id) =>
+    (delete(customers)..where((c) => c.id.equals(id))).go();
+  Future<void> deleteLedgerForCustomer(int customerId) =>
+    (delete(creditLedger)..where((l) => l.customerId.equals(customerId))).go();
+  Future<void> updateCustomer(int id, CustomersCompanion c) =>
+    (update(customers)..where((cu) => cu.id.equals(id))).write(c);
+  Future<CustomerRow?> byName(String name) =>
+    (select(customers)..where((c) => c.name.equals(name))).getSingleOrNull();
 }
 
 @DriftAccessor(tables: [CashRegisters, Expenses, CashTransactions])

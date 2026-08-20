@@ -1677,6 +1677,12 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
                                         style: TextStyle(
                                             fontSize: 11, color: cs.primary)),
                                 ]),
+                            const SizedBox(width: 4),
+                            SizedBox(width: 28, height: 28, child: IconButton(
+                              padding: EdgeInsets.zero, iconSize: 16,
+                              icon: Icon(Icons.delete_outline, color: cs.error),
+                              onPressed: () => _confirmDeleteCustomer(c),
+                            )),
                           ]),
                         ),
                       );
@@ -1704,6 +1710,27 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
                 ),
         ),
       ]),
+    ));
+  }
+
+  void _confirmDeleteCustomer(CustomerEntity c) {
+    showDialog(context: context, builder: (_) => AlertDialog(
+      title: const Text('Delete customer?'),
+      content: Text('Delete "${c.name}" (${c.phone})?${c.hasDebt ? '\n\nWarning: This customer has outstanding balance of Rs ${c.balance.toStringAsFixed(0)}.' : ''}'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: Colors.red),
+          onPressed: () async {
+            final db = ref.read(dbProvider);
+            await db.customerDao.deleteLedgerForCustomer(c.id);
+            await db.customerDao.deleteCustomer(c.id);
+            if (_selected?.id == c.id) setState(() => _selected = null);
+            if (context.mounted) { Navigator.pop(context); showSuccess(context, 'Customer deleted'); }
+          },
+          child: const Text('Delete'),
+        ),
+      ],
     ));
   }
 
