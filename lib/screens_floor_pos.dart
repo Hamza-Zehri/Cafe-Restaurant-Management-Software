@@ -11,6 +11,7 @@ class FloorScreen extends ConsumerStatefulWidget {
 class _FloorScreenState extends ConsumerState<FloorScreen> {
   int _selectedFloorId = -1;
   bool _editMode = false;
+  bool _isDeliveryFloor = false;
   final _transform = TransformationController();
 
   @override
@@ -113,7 +114,7 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
           if (_editMode) ...[
             OutlinedButton.icon(
               icon: const Icon(Icons.add_circle_outline, size: 16),
-              label: const Text('Add Table'),
+              label: Text(_isDeliveryFloor ? 'Add Rider' : 'Add Table'),
               onPressed: _addTable,
             ),
             const SizedBox(width: 8),
@@ -131,53 +132,56 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
               return tablesAsync.when(
                 loading: () => const Center(child: CircularProgressIndicator()),
                 error: (e, _) => Center(child: Text('Error: $e')),
-                data: (tables) => Column(children: [
-                  // Status bar
-                  Container(
-                    height: 36,
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    color: isDark ? AppColors.darkCard : Colors.white,
-                    child: Row(children: [
-                      Text('${tables.length} ${tables.isNotEmpty && tables.first.shape == 'rider' ? 'riders' : 'tables'}', style: const TextStyle(fontSize: 12)),
-                      const SizedBox(width: 16),
-                      _FloorLegend(AppColors.tableAvailable, 'Available'),
-                      const SizedBox(width: 12),
-                      _FloorLegend(AppColors.tableOccupied, tables.isNotEmpty && tables.first.shape == 'rider' ? 'On Delivery' : 'Occupied'),
-                      const SizedBox(width: 12),
-                      _FloorLegend(AppColors.tableReserved, 'Reserved'),
-                      const Spacer(),
-                      if (_editMode) Text('Drag tables to reposition', style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
-                      if (!_editMode) Text(
-                        tables.isNotEmpty && tables.first.shape == 'rider'
-                          ? 'Tap a rider to start a delivery order'
-                          : 'Tap a table to open order terminal',
-                        style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
-                    ]),
-                  ),
-                  // Canvas
-                  Expanded(
-                    child: Container(
-                      color: isDark ? const Color(0xFF0A1628) : const Color(0xFFF0F4F8),
-                      child: InteractiveViewer(
-                        transformationController: _transform,
-                        minScale: 0.3, maxScale: 3.0,
-                        constrained: false,
-                        child: SizedBox(
-                          width: 2000, height: 1400,
-                          child: CustomPaint(
-                            painter: _GridPainter(isDark ? const Color(0xFF1A2332) : const Color(0xFFDDE3EA)),
-                            child: Stack(children: tables.map((t) => _TableWidget(
-                              table: t,
-                              editMode: _editMode,
-                              onTap: () => _onTableTap(t),
-                              onDragged: (pos) => ref.read(dbProvider).tableDao.updatePosition(t.id, pos.dx, pos.dy),
-                            )).toList()),
+                data: (tables) {
+                  _isDeliveryFloor = tables.isNotEmpty && tables.first.shape == 'rider';
+                  return Column(children: [
+                    // Status bar
+                    Container(
+                      height: 36,
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      color: isDark ? AppColors.darkCard : Colors.white,
+                      child: Row(children: [
+                        Text('${tables.length} ${tables.isNotEmpty && tables.first.shape == 'rider' ? 'riders' : 'tables'}', style: const TextStyle(fontSize: 12)),
+                        const SizedBox(width: 16),
+                        _FloorLegend(AppColors.tableAvailable, 'Available'),
+                        const SizedBox(width: 12),
+                        _FloorLegend(AppColors.tableOccupied, tables.isNotEmpty && tables.first.shape == 'rider' ? 'On Delivery' : 'Occupied'),
+                        const SizedBox(width: 12),
+                        _FloorLegend(AppColors.tableReserved, 'Reserved'),
+                        const Spacer(),
+                        if (_editMode) Text('Drag tables to reposition', style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+                        if (!_editMode) Text(
+                          tables.isNotEmpty && tables.first.shape == 'rider'
+                            ? 'Tap a rider to start a delivery order'
+                            : 'Tap a table to open order terminal',
+                          style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+                      ]),
+                    ),
+                    // Canvas
+                    Expanded(
+                      child: Container(
+                        color: isDark ? const Color(0xFF0A1628) : const Color(0xFFF0F4F8),
+                        child: InteractiveViewer(
+                          transformationController: _transform,
+                          minScale: 0.3, maxScale: 3.0,
+                          constrained: false,
+                          child: SizedBox(
+                            width: 2000, height: 1400,
+                            child: CustomPaint(
+                              painter: _GridPainter(isDark ? const Color(0xFF1A2332) : const Color(0xFFDDE3EA)),
+                              child: Stack(children: tables.map((t) => _TableWidget(
+                                table: t,
+                                editMode: _editMode,
+                                onTap: () => _onTableTap(t),
+                                onDragged: (pos) => ref.read(dbProvider).tableDao.updatePosition(t.id, pos.dx, pos.dy),
+                              )).toList()),
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                ]),
+                  ]);
+                },
               );
             }),
     ));
@@ -484,6 +488,7 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
     final floorRows = await db.tableDao.allFloors();
     final floor = floorRows.firstWhere((f) => f.id == _selectedFloorId, orElse: () => floorRows.first);
     final prefix = floor.prefix;
+    final isRider = existing.isNotEmpty && existing.first.shape == 'rider';
     var maxNum = 0;
     for (final t in existing) {
       if (t.name.startsWith(prefix)) {
@@ -491,12 +496,14 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
         if (n != null && n > maxNum) maxNum = n;
       }
     }
-    final newName = '$prefix${maxNum + 1}';
+    final newName = isRider ? 'Rider ${maxNum + 1}' : '$prefix${maxNum + 1}';
     await db.into(db.restaurantTables).insert(RestaurantTablesCompanion.insert(
       floorId: _selectedFloorId,
       name: newName,
       posX: const Value(100),
       posY: const Value(100),
+      capacity: const Value(1),
+      shape: isRider ? const Value('rider') : const Value.absent(),
     ));
   }
 }
@@ -679,16 +686,17 @@ class _TableWidgetState extends ConsumerState<_TableWidget> with SingleTickerPro
   }
 
   Future<void> _deleteTable(WidgetRef ref, TableEntity table) async {
+    final isRider = table.shape == 'rider';
     if (table.isOccupied) {
-      showError(context, 'Table ${table.name} has an open order. Settle the bill before deleting.');
+      showError(context, '${isRider ? 'Rider' : 'Table'} ${table.name} has an open order. Settle the bill before deleting.');
       return;
     }
     final db = ref.read(dbProvider);
     final hasHistory = await db.orderDao.hasOrdersForTable(table.id);
     final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
-      title: const Text('Delete table'),
+      title: Text(isRider ? 'Delete rider' : 'Delete table'),
       content: Text(hasHistory
-        ? 'Delete "${table.name}"? This table has order history that will also be removed. This cannot be undone.'
+        ? 'Delete "${table.name}"? This ${isRider ? 'rider' : 'table'} has order history that will also be removed. This cannot be undone.'
         : 'Delete "${table.name}"? This cannot be undone.'),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
@@ -714,14 +722,15 @@ class _TableWidgetState extends ConsumerState<_TableWidget> with SingleTickerPro
     final nameCtrl = TextEditingController(text: table.name);
     final capCtrl = TextEditingController(text: '${table.capacity}');
     final db = ref.read(dbProvider);
+    final isRider = table.shape == 'rider';
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Edit Table'),
+        title: Text(isRider ? 'Edit Rider' : 'Edit Table'),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(
             controller: nameCtrl,
-            decoration: const InputDecoration(labelText: 'Table name', border: OutlineInputBorder()),
+            decoration: InputDecoration(labelText: isRider ? 'Rider name' : 'Table name', border: const OutlineInputBorder()),
             autofocus: true,
           ),
           const SizedBox(height: 12),
@@ -741,7 +750,7 @@ class _TableWidgetState extends ConsumerState<_TableWidget> with SingleTickerPro
     final newName = nameCtrl.text.trim();
     final newCap = int.tryParse(capCtrl.text.trim()) ?? table.capacity;
     if (newName.isEmpty) {
-      showError(context, 'Table name cannot be empty');
+      showError(context, '${isRider ? 'Rider' : 'Table'} name cannot be empty');
       return;
     }
     await db.tableDao.updateTable(table.id, name: newName, capacity: newCap);
