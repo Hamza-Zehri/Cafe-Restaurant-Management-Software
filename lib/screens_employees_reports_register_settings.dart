@@ -912,6 +912,11 @@ class _SalesSummaryTab extends ConsumerWidget {
                       child: Text(inv.paymentMethod.toUpperCase(), style: const TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.w700)),
                     ),
                     const SizedBox(width: 8),
+                    SizedBox(width: 28, height: 28, child: IconButton(
+                      padding: EdgeInsets.zero, iconSize: 16,
+                      icon: const Icon(Icons.delete_outline, color: Colors.red),
+                      onPressed: () => _confirmDeleteInvoice(context, ref, inv),
+                    )),
                     Icon(Icons.chevron_right, size: 18, color: context.cs.onSurfaceVariant),
                   ]),
                 ),
@@ -925,6 +930,25 @@ class _SalesSummaryTab extends ConsumerWidget {
   BarChartGroupData _bar(int x, double y, Color color) => BarChartGroupData(x: x, barRods: [
     BarChartRodData(toY: y, color: color, width: 36, borderRadius: const BorderRadius.vertical(top: Radius.circular(5))),
   ]);
+
+  void _confirmDeleteInvoice(BuildContext context, WidgetRef ref, InvoiceRow inv) {
+    final sym = ref.read(settingsProvider).currencySymbol;
+    showDialog(context: context, builder: (_) => AlertDialog(
+      title: const Text('Delete invoice?'),
+      content: Text('Delete ${inv.invoiceNumber} - $sym ${inv.grandTotal.toStringAsFixed(0)}?\n\nThis will reverse the register totals and cannot be undone.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: Colors.red),
+          onPressed: () async {
+            await ref.read(registerProvider.notifier).deleteInvoice(inv.id);
+            if (context.mounted) { Navigator.pop(context); showSuccess(context, 'Invoice deleted'); }
+          },
+          child: const Text('Delete'),
+        ),
+      ],
+    ));
+  }
 
   Future<InvoiceEntity> _buildInvoiceEntity(WidgetRef ref, InvoiceRow inv) async {
     final db = ref.read(dbProvider);
@@ -2185,7 +2209,55 @@ class _OpenRegisterPanel extends ConsumerWidget {
             ]),
           ]))),
           const SizedBox(width: 16),
-          // Expenses list
+          // Cash Transactions list
+          Expanded(child: AppCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Cash transactions', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 10),
+            FutureBuilder<List<CashTransaction>>(
+              future: ref.watch(dbProvider).registerDao.transactionsForRegister(register.id),
+              builder: (_, snap) {
+                final txns = snap.data ?? [];
+                if (txns.isEmpty) return Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text('No transactions recorded', style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 13)),
+                );
+                return Column(children: txns.map((t) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(children: [
+                    Icon(
+                      t.type == 'cash_in' ? Icons.add_circle_rounded :
+                      t.type == 'cash_out' ? Icons.remove_circle_rounded :
+                      Icons.money_off_rounded,
+                      size: 14,
+                      color: t.type == 'cash_in' ? Colors.green : t.type == 'cash_out' ? Colors.red : Colors.orange,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(t.note.isNotEmpty ? t.note : t.type.replaceAll('_', ' ').toUpperCase(),
+                        style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      Text(DateFormat('h:mm a').format(t.createdAt), style: TextStyle(fontSize: 10, color: context.cs.onSurfaceVariant)),
+                    ])),
+                    Text('${t.type == 'cash_out' || t.type == 'expense' ? '-' : ''}$sym ${t.amount.toStringAsFixed(0)}',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600,
+                        color: t.type == 'cash_in' ? Colors.green : t.type == 'cash_out' ? Colors.red : Colors.orange)),
+                    const SizedBox(width: 4),
+                    SizedBox(width: 24, height: 24, child: IconButton(
+                      padding: EdgeInsets.zero, iconSize: 14,
+                      icon: Icon(Icons.edit_outlined, color: context.cs.onSurfaceVariant),
+                      onPressed: () => _showEditTransactionDialog(context, ref, t, register),
+                    )),
+                    SizedBox(width: 24, height: 24, child: IconButton(
+                      padding: EdgeInsets.zero, iconSize: 14,
+                      icon: const Icon(Icons.delete_outline, color: Colors.red),
+                      onPressed: () => _confirmDeleteTransaction(context, ref, t, register),
+                    )),
+                  ]),
+                )).toList());
+              },
+            ),
+          ]))),
+          const SizedBox(width: 16),
+          // Expenses list with edit/delete
           Expanded(child: AppCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('Expenses today', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
             const SizedBox(height: 10),
@@ -2207,6 +2279,17 @@ class _OpenRegisterPanel extends ConsumerWidget {
                       Text(e.description, style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant), maxLines: 1, overflow: TextOverflow.ellipsis),
                     ])),
                     Text('$sym ${e.amount.toStringAsFixed(0)}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.orange)),
+                    const SizedBox(width: 4),
+                    SizedBox(width: 24, height: 24, child: IconButton(
+                      padding: EdgeInsets.zero, iconSize: 14,
+                      icon: Icon(Icons.edit_outlined, color: context.cs.onSurfaceVariant),
+                      onPressed: () => _showEditExpenseDialog(context, ref, e, register),
+                    )),
+                    SizedBox(width: 24, height: 24, child: IconButton(
+                      padding: EdgeInsets.zero, iconSize: 14,
+                      icon: const Icon(Icons.delete_outline, color: Colors.red),
+                      onPressed: () => _confirmDeleteExpense(context, ref, e, register),
+                    )),
                   ]),
                 )).toList());
               },
@@ -2271,6 +2354,105 @@ class _OpenRegisterPanel extends ConsumerWidget {
         ),
       ],
     )));
+  }
+
+  void _showEditExpenseDialog(BuildContext context, WidgetRef ref, ExpenseRow expense, CashRegisterEntity register) {
+    final amtCtrl = TextEditingController(text: expense.amount.toStringAsFixed(0));
+    final descCtrl = TextEditingController(text: expense.description);
+    String category = expense.category;
+    showDialog(context: context, builder: (_) => StatefulBuilder(builder: (ctx, ss) => AlertDialog(
+      title: const Text('Edit expense'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        DropdownButtonFormField<String>(
+          value: category,
+          decoration: const InputDecoration(labelText: 'Category'),
+          items: ['General', 'Utilities', 'Staff meal', 'Supplies', 'Rent', 'Maintenance', 'Other'].map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+          onChanged: (v) => ss(() => category = v!),
+        ),
+        const SizedBox(height: 10),
+        TextField(controller: amtCtrl, autofocus: true, keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: 'Amount')),
+        const SizedBox(height: 10),
+        TextField(controller: descCtrl, decoration: const InputDecoration(labelText: 'Description')),
+      ]),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () async {
+            final amount = double.tryParse(amtCtrl.text) ?? 0;
+            if (amount <= 0) return;
+            await ref.read(registerProvider.notifier).editExpense(
+              expense.id, category, amount, expense.amount, descCtrl.text, expense.paidBy);
+            if (ctx.mounted) { Navigator.pop(ctx); showSuccess(ctx, 'Expense updated'); }
+          },
+          child: const Text('Save'),
+        ),
+      ],
+    )));
+  }
+
+  void _confirmDeleteExpense(BuildContext context, WidgetRef ref, ExpenseRow expense, CashRegisterEntity register) {
+    final sym = ref.read(settingsProvider).currencySymbol;
+    showDialog(context: context, builder: (_) => AlertDialog(
+      title: const Text('Delete expense?'),
+      content: Text('Delete "${expense.category}" - $sym ${expense.amount.toStringAsFixed(0)}?'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: Colors.red),
+          onPressed: () async {
+            await ref.read(registerProvider.notifier).deleteExpense(expense.id, expense.amount);
+            if (context.mounted) { Navigator.pop(context); showSuccess(context, 'Expense deleted'); }
+          },
+          child: const Text('Delete'),
+        ),
+      ],
+    ));
+  }
+
+  void _showEditTransactionDialog(BuildContext context, WidgetRef ref, CashTransaction txn, CashRegisterEntity register) {
+    final amtCtrl = TextEditingController(text: txn.amount.toStringAsFixed(0));
+    final noteCtrl = TextEditingController(text: txn.note);
+    showDialog(context: context, builder: (_) => AlertDialog(
+      title: Text('Edit ${txn.type.replaceAll('_', ' ')}'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(controller: amtCtrl, autofocus: true, keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: 'Amount')),
+        const SizedBox(height: 10),
+        TextField(controller: noteCtrl, decoration: const InputDecoration(labelText: 'Note')),
+      ]),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () async {
+            final amount = double.tryParse(amtCtrl.text) ?? 0;
+            if (amount <= 0) return;
+            await ref.read(registerProvider.notifier).editCashTransaction(txn.id, txn.type, amount, txn.amount);
+            if (context.mounted) { Navigator.pop(context); showSuccess(context, 'Updated'); }
+          },
+          child: const Text('Save'),
+        ),
+      ],
+    ));
+  }
+
+  void _confirmDeleteTransaction(BuildContext context, WidgetRef ref, CashTransaction txn, CashRegisterEntity register) {
+    final sym = ref.read(settingsProvider).currencySymbol;
+    showDialog(context: context, builder: (_) => AlertDialog(
+      title: const Text('Delete transaction?'),
+      content: Text('Delete ${txn.type.replaceAll('_', ' ')} of $sym ${txn.amount.toStringAsFixed(0)}?'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: Colors.red),
+          onPressed: () async {
+            await ref.read(registerProvider.notifier).deleteCashTransaction(txn.id, txn.type, txn.amount);
+            if (context.mounted) { Navigator.pop(context); showSuccess(context, 'Deleted'); }
+          },
+          child: const Text('Delete'),
+        ),
+      ],
+    ));
   }
 
   void _showXReportDialog(BuildContext context, WidgetRef ref, CashRegisterEntity register) async {

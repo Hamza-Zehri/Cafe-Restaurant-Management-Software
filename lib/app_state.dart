@@ -814,8 +814,34 @@ class RegisterNotifier extends StateNotifier<CashRegisterEntity?> {
       category: category, amount: amount, description: desc,
       paidBy: paidBy, registerId: Value(reg.id),
     ));
+    await _db.registerDao.addCashTransaction(CashTransactionsCompanion.insert(
+      registerId: reg.id, type: 'expense', amount: amount,
+      note: Value('$category: $desc'), createdBy: Value(paidBy),
+    ));
     await _db.registerDao.update_(reg.id, CashRegistersCompanion(
       totalExpenses: Value(reg.totalExpenses + amount),
+    ));
+    await _load();
+  }
+
+  Future<void> deleteExpense(int expenseId, double amount) async {
+    final reg = state;
+    if (reg == null) return;
+    await _db.registerDao.deleteExpense(expenseId);
+    await _db.registerDao.update_(reg.id, CashRegistersCompanion(
+      totalExpenses: Value(reg.totalExpenses - amount),
+    ));
+    await _load();
+  }
+
+  Future<void> editExpense(int expenseId, String category, double newAmount, double oldAmount, String desc, String paidBy) async {
+    final reg = state;
+    if (reg == null) return;
+    await _db.registerDao.updateExpense(expenseId, ExpensesCompanion(
+      category: Value(category), amount: Value(newAmount), description: Value(desc), paidBy: Value(paidBy),
+    ));
+    await _db.registerDao.update_(reg.id, CashRegistersCompanion(
+      totalExpenses: Value(reg.totalExpenses - oldAmount + newAmount),
     ));
     await _load();
   }
@@ -823,6 +849,10 @@ class RegisterNotifier extends StateNotifier<CashRegisterEntity?> {
   Future<void> cashIn(double amount, String by) async {
     final reg = state;
     if (reg == null) return;
+    await _db.registerDao.addCashTransaction(CashTransactionsCompanion.insert(
+      registerId: reg.id, type: 'cash_in', amount: amount,
+      createdBy: Value(by),
+    ));
     await _db.registerDao.update_(reg.id, CashRegistersCompanion(cashIn: Value(reg.cashIn + amount)));
     await _load();
   }
@@ -830,8 +860,65 @@ class RegisterNotifier extends StateNotifier<CashRegisterEntity?> {
   Future<void> cashOut(double amount, String by) async {
     final reg = state;
     if (reg == null) return;
+    await _db.registerDao.addCashTransaction(CashTransactionsCompanion.insert(
+      registerId: reg.id, type: 'cash_out', amount: amount,
+      createdBy: Value(by),
+    ));
     await _db.registerDao.update_(reg.id, CashRegistersCompanion(cashOut: Value(reg.cashOut + amount)));
     await _load();
+  }
+
+  Future<void> deleteCashTransaction(int txnId, String type, double amount) async {
+    final reg = state;
+    if (reg == null) return;
+    await _db.registerDao.deleteCashTransaction(txnId);
+    if (type == 'cash_in') {
+      await _db.registerDao.update_(reg.id, CashRegistersCompanion(cashIn: Value(reg.cashIn - amount)));
+    } else if (type == 'cash_out') {
+      await _db.registerDao.update_(reg.id, CashRegistersCompanion(cashOut: Value(reg.cashOut - amount)));
+    } else if (type == 'expense') {
+      await _db.registerDao.update_(reg.id, CashRegistersCompanion(totalExpenses: Value(reg.totalExpenses - amount)));
+    }
+    await _load();
+  }
+
+  Future<void> editCashTransaction(int txnId, String type, double newAmount, double oldAmount) async {
+    final reg = state;
+    if (reg == null) return;
+    await _db.registerDao.updateCashTransaction(txnId, CashTransactionsCompanion(amount: Value(newAmount)));
+    if (type == 'cash_in') {
+      await _db.registerDao.update_(reg.id, CashRegistersCompanion(cashIn: Value(reg.cashIn - oldAmount + newAmount)));
+    } else if (type == 'cash_out') {
+      await _db.registerDao.update_(reg.id, CashRegistersCompanion(cashOut: Value(reg.cashOut - oldAmount + newAmount)));
+    } else if (type == 'expense') {
+      await _db.registerDao.update_(reg.id, CashRegistersCompanion(totalExpenses: Value(reg.totalExpenses - oldAmount + newAmount)));
+    }
+    await _load();
+  }
+
+  Future<void> deleteInvoice(int invoiceId) async {
+    final inv = await _db.invoiceDao.byId(invoiceId);
+    if (inv == null) return;
+    final reg = await _db.registerDao.openRegister();
+    if (reg != null) {
+      final paymentMethod = inv.paymentMethod;
+      if (paymentMethod == 'cash') {
+        await _db.registerDao.update_(reg.id, CashRegistersCompanion(totalCashSales: Value(reg.totalCashSales - inv.grandTotal)));
+      } else if (paymentMethod == 'card') {
+        await _db.registerDao.update_(reg.id, CashRegistersCompanion(totalCardSales: Value(reg.totalCardSales - inv.grandTotal)));
+      } else if (paymentMethod == 'wallet') {
+        await _db.registerDao.update_(reg.id, CashRegistersCompanion(totalWalletSales: Value(reg.totalWalletSales - inv.grandTotal)));
+      } else if (paymentMethod == 'credit') {
+        await _db.registerDao.update_(reg.id, CashRegistersCompanion(totalCreditSales: Value(reg.totalCreditSales - inv.grandTotal)));
+      }
+      await _db.registerDao.update_(reg.id, CashRegistersCompanion(
+        totalOrders: Value(reg.totalOrders - 1),
+        totalDiscounts: Value(reg.totalDiscounts - inv.discountValue),
+        totalTax: Value(reg.totalTax - inv.taxValue),
+      ));
+      await _load();
+    }
+    await _db.invoiceDao.delete_(invoiceId);
   }
 
   CashRegisterEntity _map(CashRegisterRow r) => CashRegisterEntity(

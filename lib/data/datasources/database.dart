@@ -246,6 +246,16 @@ class Expenses extends Table {
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
 }
 
+class CashTransactions extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  IntColumn get registerId => integer()();
+  TextColumn get type => text()(); // 'cash_in', 'cash_out', 'expense'
+  RealColumn get amount => real()();
+  TextColumn get note => text().withDefault(const Constant(''))();
+  TextColumn get createdBy => text().withDefault(const Constant('System'))();
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+}
+
 class Attendance extends Table {
   IntColumn get id => integer().autoIncrement()();
   IntColumn get userId => integer().references(Users, #id)();
@@ -504,6 +514,9 @@ class InvoiceDao extends DatabaseAccessor<AppDatabase> with _$InvoiceDaoMixin {
   InvoiceDao(super.db);
   Future<int> insert_(InvoicesCompanion c) => into(invoices).insert(c);
   Future<void> void_(int id) => (update(invoices)..where((i) => i.id.equals(id))).write(const InvoicesCompanion(isVoided: Value(true)));
+  Future<void> delete_(int id) => (delete(invoices)..where((i) => i.id.equals(id))).go();
+  Future<InvoiceRow?> byId(int id) =>
+    (select(invoices)..where((i) => i.id.equals(id))).getSingleOrNull();
   Future<List<InvoiceRow>> forPeriod(DateTime start, DateTime end) =>
     (select(invoices)..where((i) => i.createdAt.isBetweenValues(start, end) & i.isVoided.equals(false))..orderBy([(i) => OrderingTerm.desc(i.createdAt)])).get();
   Future<InvoiceRow?> byOrder(int orderId) =>
@@ -527,7 +540,7 @@ class CustomerDao extends DatabaseAccessor<AppDatabase> with _$CustomerDaoMixin 
   Future<void> insertLedger(CreditLedgerCompanion c) => into(creditLedger).insert(c);
 }
 
-@DriftAccessor(tables: [CashRegisters, Expenses])
+@DriftAccessor(tables: [CashRegisters, Expenses, CashTransactions])
 class RegisterDao extends DatabaseAccessor<AppDatabase> with _$RegisterDaoMixin {
   RegisterDao(super.db);
   Future<CashRegisterRow?> openRegister() =>
@@ -538,10 +551,42 @@ class RegisterDao extends DatabaseAccessor<AppDatabase> with _$RegisterDaoMixin 
   Future<void> update_(int id, CashRegistersCompanion c) =>
     (update(cashRegisters)..where((r) => r.id.equals(id))).write(c);
   Future<int> addExpense(ExpensesCompanion c) => into(expenses).insert(c);
+  Future<void> updateExpense(int id, ExpensesCompanion c) =>
+    (update(expenses)..where((e) => e.id.equals(id))).write(c);
+  Future<void> deleteExpense(int id) =>
+    (delete(expenses)..where((e) => e.id.equals(id))).go();
   Future<List<ExpenseRow>> expensesForRegister(int regId) =>
     (select(expenses)..where((e) => e.registerId.equals(regId))..orderBy([(e) => OrderingTerm.desc(e.createdAt)])).get();
   Future<List<ExpenseRow>> expensesForPeriod(DateTime start, DateTime end) =>
     (select(expenses)..where((e) => e.createdAt.isBetweenValues(start, end))..orderBy([(e) => OrderingTerm.desc(e.createdAt)])).get();
+
+  // CashTransactions
+  Future<int> addCashTransaction(CashTransactionsCompanion c) => into(cashTransactions).insert(c);
+  Future<void> updateCashTransaction(int id, CashTransactionsCompanion c) =>
+    (update(cashTransactions)..where((t) => t.id.equals(id))).write(c);
+  Future<void> deleteCashTransaction(int id) =>
+    (delete(cashTransactions)..where((t) => t.id.equals(id))).go();
+  Future<List<CashTransaction>> transactionsForRegister(int regId) =>
+    (select(cashTransactions)..where((t) => t.registerId.equals(regId))..orderBy([(t) => OrderingTerm.desc(t.createdAt)])).get();
+  Future<double> sumCashIn(int regId) async {
+    final q = selectOnly(cashTransactions)..addColumns([cashTransactions.amount.sum()])
+      ..where(cashTransactions.registerId.equals(regId) & cashTransactions.type.equals('cash_in'));
+    final r = await q.getSingleOrNull();
+    return r?.read(cashTransactions.amount.sum()) ?? 0;
+  }
+  Future<double> sumCashOut(int regId) async {
+    final q = selectOnly(cashTransactions)..addColumns([cashTransactions.amount.sum()])
+      ..where(cashTransactions.registerId.equals(regId) & cashTransactions.type.equals('cash_out'));
+    final r = await q.getSingleOrNull();
+    return r?.read(cashTransactions.amount.sum()) ?? 0;
+  }
+  Future<double> sumExpenses(int regId) async {
+    final q = selectOnly(cashTransactions)..addColumns([cashTransactions.amount.sum()])
+      ..where(cashTransactions.registerId.equals(regId) & cashTransactions.type.equals('expense'));
+    final r = await q.getSingleOrNull();
+    return r?.read(cashTransactions.amount.sum()) ?? 0;
+  }
+
   Future<List<CashRegisterRow>> history() =>
     (select(cashRegisters)..orderBy([(r) => OrderingTerm.desc(r.openedAt)])).get();
   Stream<List<CashRegisterRow>> watchHistory() =>
@@ -614,13 +659,13 @@ class SettingsDao extends DatabaseAccessor<AppDatabase> with _$SettingsDaoMixin 
 @DriftDatabase(tables: [
   Users, Floors, RestaurantTables, MenuGroups, MenuItems,
   Orders, OrderItems, Invoices, Customers, CreditLedger,
-  InventoryItems, CashRegisters, Expenses, Attendance,
+  InventoryItems, CashRegisters, Expenses, CashTransactions, Attendance,
   SalaryPayments, AppSettings, Deals, DealItems, BackupHistories,
 ], daos: [UserDao, TableDao, MenuDao, OrderDao, InvoiceDao, CustomerDao, RegisterDao, HRDao, SettingsDao, DealDao])
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _open());
 
-  @override int get schemaVersion => 5;
+  @override int get schemaVersion => 6;
 
   @override MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) async {
@@ -647,6 +692,9 @@ class AppDatabase extends _$AppDatabase {
         await m.addColumn(orders, orders.riderName);
         await m.addColumn(orders, orders.deliveryCharges);
         await m.addColumn(invoices, invoices.deliveryCharges);
+      }
+      if (from < 6) {
+        await m.createTable(cashTransactions);
       }
     },
     beforeOpen: (m) async {
