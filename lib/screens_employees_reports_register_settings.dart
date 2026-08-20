@@ -2214,6 +2214,7 @@ class _OpenRegisterPanel extends ConsumerWidget {
             Text('Cash transactions', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
             const SizedBox(height: 10),
             FutureBuilder<List<CashTransaction>>(
+              key: ValueKey('txn_${register.id}_${register.cashIn}_${register.cashOut}_${register.totalExpenses}'),
               future: ref.watch(dbProvider).registerDao.transactionsForRegister(register.id),
               builder: (_, snap) {
                 final txns = snap.data ?? [];
@@ -2262,6 +2263,7 @@ class _OpenRegisterPanel extends ConsumerWidget {
             Text('Expenses today', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
             const SizedBox(height: 10),
             FutureBuilder<List<ExpenseRow>>(
+              key: ValueKey('exp_${register.id}_${register.totalExpenses}'),
               future: ref.watch(dbProvider).registerDao.expensesForRegister(register.id),
               builder: (_, snap) {
                 final expenses = snap.data ?? [];
