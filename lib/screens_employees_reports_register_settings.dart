@@ -1985,13 +1985,13 @@ class _RegMiniStat extends StatelessWidget {
   ]);
 }
 
-class _ExpenseRowTile extends StatelessWidget {
+class _ExpenseRowTile extends ConsumerWidget {
   const _ExpenseRowTile({required this.expense, required this.sym});
   final ExpenseRow expense;
   final String sym;
 
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context, WidgetRef ref) => Container(
     margin: const EdgeInsets.only(bottom: 8),
     padding: const EdgeInsets.all(10),
     decoration: BoxDecoration(
@@ -2020,8 +2020,93 @@ class _ExpenseRowTile extends StatelessWidget {
       ])),
       const SizedBox(width: 8),
       Text('$sym ${expense.amount.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: AppColors.error)),
+      const SizedBox(width: 4),
+      SizedBox(width: 26, height: 26, child: IconButton(
+        padding: EdgeInsets.zero, iconSize: 15,
+        icon: Icon(Icons.edit_outlined, color: context.cs.onSurfaceVariant),
+        onPressed: () => _editExpense(context, ref),
+      )),
+      SizedBox(width: 26, height: 26, child: IconButton(
+        padding: EdgeInsets.zero, iconSize: 15,
+        icon: const Icon(Icons.delete_outline, color: Colors.red),
+        onPressed: () => _deleteExpense(context, ref),
+      )),
     ]),
   );
+
+  void _editExpense(BuildContext context, WidgetRef ref) {
+    final amtCtrl = TextEditingController(text: expense.amount.toStringAsFixed(0));
+    final descCtrl = TextEditingController(text: expense.description);
+    String category = expense.category;
+    showDialog(context: context, builder: (_) => StatefulBuilder(builder: (ctx, ss) => AlertDialog(
+      title: const Text('Edit expense'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        DropdownButtonFormField<String>(
+          value: category,
+          decoration: const InputDecoration(labelText: 'Category'),
+          items: ['General', 'Utilities', 'Staff meal', 'Supplies', 'Rent', 'Maintenance', 'Other'].map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+          onChanged: (v) => ss(() => category = v!),
+        ),
+        const SizedBox(height: 10),
+        TextField(controller: amtCtrl, autofocus: true, keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: 'Amount')),
+        const SizedBox(height: 10),
+        TextField(controller: descCtrl, decoration: const InputDecoration(labelText: 'Description')),
+      ]),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () async {
+            final amount = double.tryParse(amtCtrl.text) ?? 0;
+            if (amount <= 0) return;
+            final db = ref.read(dbProvider);
+            await db.registerDao.updateExpense(expense.id, ExpensesCompanion(
+              category: Value(category), amount: Value(amount), description: Value(descCtrl.text),
+            ));
+            if (expense.registerId != null) {
+              final reg = await db.registerDao.openRegister();
+              if (reg != null && reg.id == expense.registerId) {
+                await db.registerDao.update_(reg.id, CashRegistersCompanion(
+                  totalExpenses: Value(reg.totalExpenses - expense.amount + amount),
+                ));
+                ref.invalidate(registerProvider);
+              }
+            }
+            if (ctx.mounted) { Navigator.pop(ctx); showSuccess(ctx, 'Expense updated'); }
+          },
+          child: const Text('Save'),
+        ),
+      ],
+    )));
+  }
+
+  void _deleteExpense(BuildContext context, WidgetRef ref) {
+    showDialog(context: context, builder: (_) => AlertDialog(
+      title: const Text('Delete expense?'),
+      content: Text('Delete "${expense.category}" - $sym ${expense.amount.toStringAsFixed(0)}?'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: Colors.red),
+          onPressed: () async {
+            final db = ref.read(dbProvider);
+            await db.registerDao.deleteExpense(expense.id);
+            if (expense.registerId != null) {
+              final reg = await db.registerDao.openRegister();
+              if (reg != null && reg.id == expense.registerId) {
+                await db.registerDao.update_(reg.id, CashRegistersCompanion(
+                  totalExpenses: Value(reg.totalExpenses - expense.amount),
+                ));
+                ref.invalidate(registerProvider);
+              }
+            }
+            if (context.mounted) { Navigator.pop(context); showSuccess(context, 'Expense deleted'); }
+          },
+          child: const Text('Delete'),
+        ),
+      ],
+    ));
+  }
 }
 
 // ═══════════════════════════════════════════════════════
