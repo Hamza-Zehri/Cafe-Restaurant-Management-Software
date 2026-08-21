@@ -714,7 +714,7 @@ class PrintService {
         t.row('DIFFERENCE', '${diff >= 0 ? '+' : ''}$sym ${diff.toStringAsFixed(0)}', size: 11, font: thermalBold),
         t.dashedLine(),
         t.section('KITCHEN', font: thermalBold),
-        t.row('Tickets printed', '${reg.totalKitchenTickets}', size: 9, font: thermalRegular),
+        t.row('Tickets printed', '${data.kitchenGenerated - data.voidedKitchen}', size: 9, font: thermalRegular),
         t.row('Void transactions', '${data.cancelledOrderNumbers.length}', size: 9, font: thermalRegular),
         if (data.cancelledItems.isNotEmpty) ...[
           pw.SizedBox(height: 4),

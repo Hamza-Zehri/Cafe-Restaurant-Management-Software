@@ -20,7 +20,9 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final floors = await ref.read(dbProvider).tableDao.allFloors();
       if (floors.isNotEmpty && mounted) {
-        setState(() => _selectedFloorId = floors.first.id);
+        final saved = ref.read(selectedFloorProvider);
+        final match = saved != null ? floors.where((f) => f.id == saved).firstOrNull : null;
+        setState(() => _selectedFloorId = match?.id ?? floors.first.id);
       }
     });
   }
@@ -46,7 +48,10 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
                 padding: const EdgeInsets.only(right: 6),
                 child: Stack(clipBehavior: Clip.none, children: [
                   GestureDetector(
-                    onTap: () => setState(() => _selectedFloorId = f.id),
+                    onTap: () => setState(() {
+                      _selectedFloorId = f.id;
+                      ref.read(selectedFloorProvider.notifier).state = f.id;
+                    }),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 200),
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
@@ -189,6 +194,7 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
 
   void _onTableTap(TableEntity table) {
     if (_editMode) return;
+    ref.read(selectedFloorProvider.notifier).state = table.floorId;
     if (table.isAvailable) {
       if (table.shape == 'rider') {
         _showDeliveryDialog(table);
@@ -476,7 +482,9 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
     await (db.delete(db.floors)..where((f) => f.id.equals(floor.id))).go();
     if (mounted && _selectedFloorId == floor.id) {
       final remaining = await db.tableDao.allFloors();
-      setState(() => _selectedFloorId = remaining.isNotEmpty ? remaining.first.id : -1);
+      final newId = remaining.isNotEmpty ? remaining.first.id : -1;
+      setState(() => _selectedFloorId = newId);
+      ref.read(selectedFloorProvider.notifier).state = newId == -1 ? null : newId;
     }
     ref.invalidate(floorsProvider);
   }

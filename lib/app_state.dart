@@ -21,6 +21,9 @@ final dbProvider = Provider<AppDatabase>((ref) {
   return db;
 });
 
+// ── Selected floor (persists across navigation) ───────
+final selectedFloorProvider = StateProvider<int?>((ref) => null);
+
 // ── Initialization state ──────────────────────────────
 class InitState {
   const InitState({this.isLoading = true, this.hasAdmin = false});
@@ -689,8 +692,13 @@ class POSNotifier extends StateNotifier<AsyncValue<OrderEntity?>> {
     await _db.tableDao.freeTable(_tableId);
     final reg = await _db.registerDao.openRegister();
     if (reg != null) {
-      await _db.registerDao.update_(reg.id, CashRegistersCompanion(totalVoids: Value(reg.totalVoids + 1)));
-      // Refresh register provider so dashboard updates!
+      final ticketDecrement = o.kitchenTicketCount;
+      await _db.registerDao.update_(reg.id, CashRegistersCompanion(
+        totalVoids: Value(reg.totalVoids + 1),
+        totalKitchenTickets: ticketDecrement > 0
+          ? Value(reg.totalKitchenTickets - ticketDecrement)
+          : const Value.absent(),
+      ));
       _ref.read(registerProvider.notifier)._load();
     }
     state = const AsyncValue.data(null);
