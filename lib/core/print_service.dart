@@ -238,7 +238,9 @@ class PrintService {
     var kitchenGenerated = 0, kitchenItemsSent = 0, kitchenCompleted = 0, voidedKitchen = 0;
     final kitchenQty = <String, int>{};
     for (final order in orders) {
-      kitchenGenerated += order.kitchenTicketCount;
+      if (order.status != 'cancelled') {
+        kitchenGenerated += order.kitchenTicketCount;
+      }
       final items = await db.orderDao.itemsForOrder(order.id);
       for (final it in items) {
         if (it.isVoided) continue;
@@ -249,7 +251,7 @@ class PrintService {
       }
       if (order.kitchenTicketCount > 0) {
         if (order.status == 'paid') kitchenCompleted++;
-        if (order.status == 'cancelled') voidedKitchen++;
+        if (order.status == 'cancelled') voidedKitchen += order.kitchenTicketCount;
       }
     }
 
@@ -714,7 +716,7 @@ class PrintService {
         t.row('DIFFERENCE', '${diff >= 0 ? '+' : ''}$sym ${diff.toStringAsFixed(0)}', size: 11, font: thermalBold),
         t.dashedLine(),
         t.section('KITCHEN', font: thermalBold),
-        t.row('Tickets printed', '${data.kitchenGenerated - data.voidedKitchen}', size: 9, font: thermalRegular),
+        t.row('Tickets printed', '${data.kitchenGenerated}', size: 9, font: thermalRegular),
         t.row('Void transactions', '${data.cancelledOrderNumbers.length}', size: 9, font: thermalRegular),
         if (data.cancelledItems.isNotEmpty) ...[
           pw.SizedBox(height: 4),
@@ -773,7 +775,7 @@ class PrintService {
         t.dashedLine(h: 1.2),
         pw.SizedBox(height: 4),
         t.section('KITCHEN', font: thermalBold),
-        t.row('Tickets printed', '${data.kitchenGenerated - data.voidedKitchen}', size: 9, font: thermalRegular),
+        t.row('Tickets printed', '${data.kitchenGenerated}', size: 9, font: thermalRegular),
         t.row('Void tickets', '${data.voidedKitchen}', size: 9, font: thermalRegular),
         if (data.cancelledItems.isNotEmpty) ...[
           pw.SizedBox(height: 4),

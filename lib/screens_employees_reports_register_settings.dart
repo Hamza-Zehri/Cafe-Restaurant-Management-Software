@@ -2547,7 +2547,7 @@ class _OpenRegisterPanel extends ConsumerWidget {
     final sym = ref.read(settingsProvider).currencySymbol;
     final now = DateTime.now();
     if (!context.mounted) return;
-    final effectiveTickets = data.kitchenGenerated - data.voidedKitchen;
+    final effectiveTickets = data.kitchenGenerated;
     await showDialog(context: context, builder: (_) => AlertDialog(
       title: Row(children: [
         const Icon(Icons.receipt_long, size: 20),
