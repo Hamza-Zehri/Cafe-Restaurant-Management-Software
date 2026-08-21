@@ -772,6 +772,22 @@ class PrintService {
           )),
         t.dashedLine(h: 1.2),
         pw.SizedBox(height: 4),
+        t.section('KITCHEN', font: thermalBold),
+        t.row('Tickets printed', '${data.kitchenGenerated - data.voidedKitchen}', size: 9, font: thermalRegular),
+        t.row('Void tickets', '${data.voidedKitchen}', size: 9, font: thermalRegular),
+        if (data.cancelledItems.isNotEmpty) ...[
+          pw.SizedBox(height: 4),
+          t.section('CANCELLED ITEMS', font: thermalBold),
+          ...data.cancelledItems.map((c) => pw.Padding(
+            padding: const pw.EdgeInsets.only(bottom: 2),
+            child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+              t.row('  ${c.quantity}x ${c.itemName}', '', size: 9, font: thermalRegular),
+              t.sub('    Order #${c.orderNumber}  Ticket #${c.ticketNumber}', size: 8, font: thermalRegular),
+            ]),
+          )),
+        ],
+        t.dashedLine(h: 1.2),
+        pw.SizedBox(height: 4),
         t.center('*** X REPORT — CONTINUES ***', font: thermalBold, size: 9),
         t.center(_df.format(DateTime.now()), font: thermalRegular, size: 8),
         t.credit(thermalRegular, 7),

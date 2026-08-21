@@ -2547,6 +2547,7 @@ class _OpenRegisterPanel extends ConsumerWidget {
     final sym = ref.read(settingsProvider).currencySymbol;
     final now = DateTime.now();
     if (!context.mounted) return;
+    final effectiveTickets = data.kitchenGenerated - data.voidedKitchen;
     await showDialog(context: context, builder: (_) => AlertDialog(
       title: Row(children: [
         const Icon(Icons.receipt_long, size: 20),
@@ -2569,6 +2570,23 @@ class _OpenRegisterPanel extends ConsumerWidget {
               Text('$sym ${s.amount.toStringAsFixed(0)}', style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant)),
             ]),
           )),
+        const SizedBox(height: 12),
+        Text('KITCHEN', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.cs.primary, letterSpacing: 0.6)),
+        const SizedBox(height: 6),
+        _XRow('Tickets printed', '$effectiveTickets'),
+        _XRow('Void tickets', '${data.voidedKitchen}'),
+        if (data.cancelledItems.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text('CANCELLED ITEMS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.error, letterSpacing: 0.6)),
+          const SizedBox(height: 6),
+          ...data.cancelledItems.map((c) => Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('${c.quantity}x ${c.itemName}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              Text('Order #${c.orderNumber}  Ticket #${c.ticketNumber}', style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+            ]),
+          )),
+        ],
       ]))),
       actions: [
         TextButton.icon(
