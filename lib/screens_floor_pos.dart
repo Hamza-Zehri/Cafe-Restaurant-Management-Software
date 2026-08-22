@@ -909,6 +909,7 @@ class _POSScreenState extends ConsumerState<POSScreen> {
             tableId: widget.tableId,
             onQtyChange: (itemId, qty) => ref.read(posProvider(widget.tableId).notifier).setQty(itemId, qty),
             onVoidItem: (itemId) => ref.read(posProvider(widget.tableId).notifier).voidItem(itemId),
+            onPrintItem: (itemId) => _printItemKitchenTicket(itemId),
             onDiscount: _showDiscountDialog,
             onKitchen: order != null && order.pendingKitchenItems.isNotEmpty ? _sendToKitchen : null,
             onBill: order != null && order.activeItems.isNotEmpty ? _printBill : null,
@@ -996,6 +997,36 @@ class _POSScreenState extends ConsumerState<POSScreen> {
     } else {
       if (mounted) showSuccess(context, 'Sent to kitchen');
     }
+    } finally { _printing = false; }
+  }
+
+  Future<void> _printKitchenTicket() async {
+    if (_printing) return;
+    final order = ref.read(posProvider(widget.tableId)).valueOrNull;
+    if (order == null) return;
+    _printing = true;
+    try {
+      final reg = await ref.read(dbProvider).registerDao.openRegister();
+      await PrintService.instance.printKitchenTicketAll(order, ticketNumber: reg?.totalKitchenTickets);
+      if (mounted) showSuccess(context, 'Kitchen ticket printed');
+    } catch (e) {
+      if (mounted) showError(context, 'Print failed: ${e is PrintException ? e.message : e}');
+    } finally { _printing = false; }
+  }
+
+  Future<void> _printItemKitchenTicket(int itemId) async {
+    if (_printing) return;
+    final order = ref.read(posProvider(widget.tableId)).valueOrNull;
+    if (order == null) return;
+    final item = order.items.where((i) => i.id == itemId).firstOrNull;
+    if (item == null) return;
+    _printing = true;
+    try {
+      final reg = await ref.read(dbProvider).registerDao.openRegister();
+      await PrintService.instance.printKitchenTicketItem(order, item, ticketNumber: reg?.totalKitchenTickets);
+      if (mounted) showSuccess(context, 'Kitchen ticket printed');
+    } catch (e) {
+      if (mounted) showError(context, 'Print failed: ${e is PrintException ? e.message : e}');
     } finally { _printing = false; }
   }
 
@@ -1616,13 +1647,14 @@ class _SearchResults extends ConsumerWidget {
 class _CartPanel extends ConsumerWidget {
   const _CartPanel({
     required this.order, required this.tableId,
-    required this.onQtyChange, required this.onVoidItem,
+    required this.onQtyChange, required this.onVoidItem, required this.onPrintItem,
     required this.onDiscount, this.onKitchen, this.onBill, this.onPay,
   });
   final OrderEntity? order;
   final int tableId;
   final void Function(int itemId, int qty) onQtyChange;
   final void Function(int itemId) onVoidItem;
+  final void Function(int itemId) onPrintItem;
   final VoidCallback onDiscount;
   final VoidCallback? onKitchen;
   final VoidCallback? onBill;
@@ -1679,6 +1711,7 @@ class _CartPanel extends ConsumerWidget {
                     onIncrement: () => onQtyChange(item.id, item.quantity + 1),
                     onDecrement: () => onQtyChange(item.id, item.quantity - 1),
                     onVoid: () => onVoidItem(item.id),
+                    onPrintKitchen: () => onPrintItem(item.id),
                   ).animate(delay: Duration(milliseconds: i * 20)).fadeIn();
                 },
               ),
@@ -1753,10 +1786,10 @@ class _CartPanel extends ConsumerWidget {
 }
 
 class _CartItemRow extends StatelessWidget {
-  const _CartItemRow({required this.item, required this.settings, required this.onIncrement, required this.onDecrement, required this.onVoid});
+  const _CartItemRow({required this.item, required this.settings, required this.onIncrement, required this.onDecrement, required this.onVoid, required this.onPrintKitchen});
   final OrderItemEntity item;
   final RestaurantSettings settings;
-  final VoidCallback onIncrement, onDecrement, onVoid;
+  final VoidCallback onIncrement, onDecrement, onVoid, onPrintKitchen;
 
   @override
   Widget build(BuildContext context) {
@@ -1823,6 +1856,12 @@ class _CartItemRow extends StatelessWidget {
             child: Text(_statusLabel(item.status), style: TextStyle(fontSize: 10, color: statusColor, fontWeight: FontWeight.w500)),
           ),
           const Spacer(),
+          // Print kitchen ticket for this item
+          GestureDetector(
+            onTap: onPrintKitchen,
+            child: Icon(Icons.print_rounded, size: 18, color: context.cs.onSurfaceVariant),
+          ),
+          const SizedBox(width: 10),
           // Void (always visible — voids item even after kitchen ticket)
           GestureDetector(
             onTap: onVoid,

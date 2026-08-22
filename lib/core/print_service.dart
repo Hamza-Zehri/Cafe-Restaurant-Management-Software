@@ -288,6 +288,21 @@ class PrintService {
         (format) => _buildKitchenPDF(format, order, items, ticketNumber: ticketNumber));
   }
 
+  Future<void> printKitchenTicketAll(OrderEntity order, {int? ticketNumber}) async {
+    final items = order.items.where((i) => !i.isVoided).toList();
+    if (items.isEmpty) return;
+
+    await _emit('Kitchen-${order.orderNumber}-all',
+        (format) => _buildKitchenPDF(format, order, items, ticketNumber: ticketNumber));
+  }
+
+  Future<void> printKitchenTicketItem(OrderEntity order, OrderItemEntity item, {int? ticketNumber}) async {
+    if (item.isVoided) return;
+
+    await _emit('Kitchen-${order.orderNumber}-item-${item.id}',
+        (format) => _buildKitchenPDF(format, order, [item], ticketNumber: ticketNumber));
+  }
+
   // ── Proforma Bill (before payment) ────────────────
   Future<void> printProformaBill(OrderEntity order) async {
     await _emit('Bill-${order.orderNumber}',
