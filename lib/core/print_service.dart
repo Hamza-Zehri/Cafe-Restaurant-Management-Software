@@ -120,11 +120,11 @@ class PrintService {
       // margins to our safe margins (2mm left, 5mm right) so the driver
       // knows the content area. The right margin is intentionally larger
       // because thermal printers have a wider unprintable zone on the
-      // right edge. The height is set to A4 for the driver's page
-      // setup — thermal printers ignore height for roll paper.
+      // right edge. Height is set to infinity so the driver does not
+      // cut or paginate at a fixed page boundary on roll paper.
       final thermalFormat = PdfPageFormat(
         fixedFormat.width,
-        PdfPageFormat.a4.height,
+        double.infinity,
         marginLeft: fixedFormat.marginLeft,
         marginTop: fixedFormat.marginTop,
         marginRight: fixedFormat.marginRight,
