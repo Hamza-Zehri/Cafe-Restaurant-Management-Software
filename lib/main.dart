@@ -910,11 +910,219 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             ),
 
             const SizedBox(height: 16),
+            _PredictWidget(),
           ])),
         ),
       ]),
     ));
   }
+}
+
+class _PredictWidget extends ConsumerStatefulWidget {
+  @override ConsumerState<_PredictWidget> createState() => _PredictWidgetState();
+}
+
+class _PredictWidgetState extends ConsumerState<_PredictWidget> {
+  String _period = 'week';
+  bool _loading = true;
+  List<_ItemStat> _topItems = [];
+  List<_GroupStat> _topGroups = [];
+
+  @override void initState() { super.initState(); _load(); }
+
+  DateTimeRange get _range {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    return switch (_period) {
+      'day'   => DateTimeRange(start: today, end: now),
+      'week'  => DateTimeRange(start: today.subtract(const Duration(days: 7)), end: now),
+      'month' => DateTimeRange(start: DateTime(now.year, now.month, 1), end: now),
+      _       => DateTimeRange(start: today, end: now),
+    };
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final db = ref.read(dbProvider);
+    final r = _range;
+    final orders = await db.orderDao.forPeriod(r.start, r.end);
+    final itemQty = <String, int>{};
+    final itemAmount = <String, double>{};
+    final itemGroup = <String, String>{};
+    final groupQty = <int, int>{};
+    final groupName = <int, String>{};
+
+    final groups = await db.menuDao.getGroups();
+    for (final g in groups) { groupName[g.id] = g.name; }
+
+    for (final order in orders) {
+      final items = await db.orderDao.itemsForOrder(order.id);
+      for (final it in items) {
+        if (it.isVoided) continue;
+        itemQty[it.menuItemName] = (itemQty[it.menuItemName] ?? 0) + it.quantity;
+        itemAmount[it.menuItemName] = (itemAmount[it.menuItemName] ?? 0) + (it.unitPrice * it.quantity);
+        if (it.menuItemId != null) {
+          final mi = await db.menuDao.byId(it.menuItemId!);
+          if (mi != null) {
+            itemGroup[it.menuItemName] = groupName[mi.groupId] ?? 'Other';
+            groupQty[mi.groupId] = (groupQty[mi.groupId] ?? 0) + it.quantity;
+          } else {
+            itemGroup[it.menuItemName] = 'Custom';
+          }
+        } else {
+          itemGroup[it.menuItemName] = 'Custom';
+        }
+      }
+    }
+
+    final topItems = itemQty.entries.map((e) => _ItemStat(e.key, e.value, itemAmount[e.key] ?? 0, itemGroup[e.key] ?? 'Other'))
+      .toList()..sort((a, b) => b.qty.compareTo(a.qty));
+    final topGroups = groupQty.entries.map((e) => _GroupStat(groupName[e.key] ?? 'Other', e.value))
+      .toList()..sort((a, b) => b.qty.compareTo(a.qty));
+
+    if (mounted) setState(() {
+      _topItems = topItems.take(7).toList();
+      _topGroups = topGroups.take(7).toList();
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sym = ref.watch(settingsProvider).currencySymbol;
+    return AppCard(child: Column(mainAxisSize: MainAxisSize.min, children: [
+      Row(children: [
+        Icon(Icons.insights_rounded, size: 18, color: context.cs.primary),
+        const SizedBox(width: 8),
+        Text('Top Sellers', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+        const Spacer(),
+        SegmentedButton<String>(
+          segments: const [
+            ButtonSegment(value: 'day', label: Text('Today')),
+            ButtonSegment(value: 'week', label: Text('Week')),
+            ButtonSegment(value: 'month', label: Text('Month')),
+          ],
+          selected: {_period},
+          onSelectionChanged: (s) { setState(() => _period = s.first); _load(); },
+          style: ButtonStyle(
+            visualDensity: VisualDensity.compact,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            textStyle: WidgetStateProperty.all(const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+            padding: WidgetStateProperty.all(const EdgeInsets.symmetric(horizontal: 10, vertical: 4)),
+          ),
+        ),
+      ]),
+      const SizedBox(height: 14),
+      if (_loading)
+        const SizedBox(height: 80, child: Center(child: CircularProgressIndicator(strokeWidth: 2)))
+      else
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          // Top 7 items
+          Expanded(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Items', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.cs.onSurfaceVariant)),
+            const SizedBox(height: 8),
+            if (_topItems.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Center(child: Text('No data', style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant))),
+              )
+            else
+              ..._topItems.asMap().entries.map((entry) {
+                final rank = entry.key + 1;
+                final item = entry.value;
+                final maxQty = _topItems.first.qty;
+                final pct = maxQty > 0 ? item.qty / maxQty : 0.0;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(children: [
+                    Container(
+                      width: 20, height: 20,
+                      decoration: BoxDecoration(
+                        color: rank <= 3 ? context.cs.primary : context.cs.onSurfaceVariant.withAlpha(30),
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: Center(child: Text('$rank', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: rank <= 3 ? Colors.white : context.cs.onSurface))),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(item.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        child: LinearProgressIndicator(
+                          value: pct, minHeight: 3,
+                          backgroundColor: context.cs.onSurfaceVariant.withAlpha(20),
+                          color: rank <= 3 ? context.cs.primary : context.cs.primary.withAlpha(140),
+                        ),
+                      ),
+                    ])),
+                    const SizedBox(width: 8),
+                    Text('${item.qty}', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: context.cs.primary)),
+                  ]),
+                );
+              }),
+          ])),
+          Container(width: 1, height: 200, margin: const EdgeInsets.symmetric(horizontal: 14), color: context.border),
+          // Top groups
+          Expanded(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Categories', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.cs.onSurfaceVariant)),
+            const SizedBox(height: 8),
+            if (_topGroups.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Center(child: Text('No data', style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant))),
+              )
+            else
+              ..._topGroups.asMap().entries.map((entry) {
+                final rank = entry.key + 1;
+                final g = entry.value;
+                final maxQty = _topGroups.first.qty;
+                final pct = maxQty > 0 ? g.qty / maxQty : 0.0;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(children: [
+                    Container(
+                      width: 20, height: 20,
+                      decoration: BoxDecoration(
+                        color: rank <= 3 ? context.cs.primary : context.cs.onSurfaceVariant.withAlpha(30),
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: Center(child: Text('$rank', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: rank <= 3 ? Colors.white : context.cs.onSurface))),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(g.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        child: LinearProgressIndicator(
+                          value: pct, minHeight: 3,
+                          backgroundColor: context.cs.onSurfaceVariant.withAlpha(20),
+                          color: rank <= 3 ? context.cs.primary : context.cs.primary.withAlpha(140),
+                        ),
+                      ),
+                    ])),
+                    const SizedBox(width: 8),
+                    Text('${g.qty}', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: context.cs.primary)),
+                  ]),
+                );
+              }),
+          ])),
+        ]),
+    ]));
+  }
+}
+
+class _ItemStat {
+  const _ItemStat(this.name, this.qty, this.amount, this.category);
+  final String name;
+  final int qty;
+  final double amount;
+  final String category;
+}
+
+class _GroupStat {
+  const _GroupStat(this.name, this.qty);
+  final String name;
+  final int qty;
 }
 
 class _StatBox extends StatelessWidget {

@@ -760,7 +760,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
   );
 
   @override
-  void initState() { super.initState(); _tab = TabController(length: 4, vsync: this); _tab.index = widget.initialTab; }
+  void initState() { super.initState(); _tab = TabController(length: 3, vsync: this); _tab.index = widget.initialTab; }
   @override void dispose() { _tab.dispose(); super.dispose(); }
 
   @override
@@ -805,13 +805,12 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
         ],
         bottom: TabBar(
           controller: _tab,
-          tabs: const [Tab(text: 'X Report'), Tab(text: 'Sales Summary'), Tab(text: 'Predict Report'), Tab(text: 'Z Report')],
+          tabs: const [Tab(text: 'X Report'), Tab(text: 'Sales Summary'), Tab(text: 'Z Report')],
         ),
       ),
       body: TabBarView(controller: _tab, children: [
         _XReportHistoryTab(),
         _SalesSummaryTab(range: _range),
-        _PredictReportTab(),
         _ZReportTab(),
       ]),
     ));
@@ -1388,251 +1387,6 @@ class _XSection extends StatelessWidget {
     const SizedBox(height: 6),
     ...rows.map((r) => _XRow(r.$1, r.$2)),
   ]);
-}
-
-class _PredictReportTab extends ConsumerStatefulWidget {
-  @override ConsumerState<_PredictReportTab> createState() => _PredictReportTabState();
-}
-
-class _PredictReportTabState extends ConsumerState<_PredictReportTab> {
-  String _period = 'month';
-  bool _loading = true;
-  List<_ItemStat> _topItems = [];
-  List<_GroupStat> _topGroups = [];
-  int _totalOrders = 0;
-  int _totalItems = 0;
-  double _totalSales = 0;
-
-  @override void initState() { super.initState(); _load(); }
-
-  DateTimeRange get _range {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    return switch (_period) {
-      'day'   => DateTimeRange(start: today, end: now),
-      'week'  => DateTimeRange(start: today.subtract(const Duration(days: 7)), end: now),
-      'month' => DateTimeRange(start: DateTime(now.year, now.month, 1), end: now),
-      _       => DateTimeRange(start: today, end: now),
-    };
-  }
-
-  Future<void> _load() async {
-    setState(() => _loading = true);
-    final db = ref.read(dbProvider);
-    final r = _range;
-    final orders = await db.orderDao.forPeriod(r.start, r.end);
-    final itemQty = <String, int>{};
-    final itemAmount = <String, double>{};
-    final itemGroup = <String, String>{};
-    final groupQty = <int, int>{};
-    final groupName = <int, String>{};
-    var totalItems = 0;
-
-    // Load menu groups for category mapping
-    final groups = await db.menuDao.getGroups();
-    for (final g in groups) { groupName[g.id] = g.name; }
-
-    for (final order in orders) {
-      final items = await db.orderDao.itemsForOrder(order.id);
-      for (final it in items) {
-        if (it.isVoided) continue;
-        itemQty[it.menuItemName] = (itemQty[it.menuItemName] ?? 0) + it.quantity;
-        itemAmount[it.menuItemName] = (itemAmount[it.menuItemName] ?? 0) + (it.unitPrice * it.quantity);
-        totalItems += it.quantity;
-        if (it.menuItemId != null) {
-          final mi = await db.menuDao.byId(it.menuItemId!);
-          if (mi != null) {
-            itemGroup[it.menuItemName] = groupName[mi.groupId] ?? 'Other';
-            groupQty[mi.groupId] = (groupQty[mi.groupId] ?? 0) + it.quantity;
-          } else {
-            itemGroup[it.menuItemName] = 'Custom';
-          }
-        } else {
-          itemGroup[it.menuItemName] = 'Custom';
-        }
-      }
-    }
-
-    final topItems = itemQty.entries.map((e) => _ItemStat(e.key, e.value, itemAmount[e.key] ?? 0, itemGroup[e.key] ?? 'Other'))
-      .toList()..sort((a, b) => b.qty.compareTo(a.qty));
-    final topGroups = groupQty.entries.map((e) => _GroupStat(groupName[e.key] ?? 'Other', e.value))
-      .toList()..sort((a, b) => b.qty.compareTo(a.qty));
-    final invoices = await db.invoiceDao.forPeriod(r.start, r.end);
-    final sales = invoices.fold(0.0, (s, i) => s + i.grandTotal);
-
-    if (mounted) setState(() {
-      _topItems = topItems.take(10).toList();
-      _topGroups = topGroups.take(10).toList();
-      _totalOrders = orders.length;
-      _totalItems = totalItems;
-      _totalSales = sales;
-      _loading = false;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final sym = ref.watch(settingsProvider).currencySymbol;
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Text('Predict Report', style: context.tt.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-          const Spacer(),
-          SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: 'day', label: Text('Today')),
-              ButtonSegment(value: 'week', label: Text('7 Days')),
-              ButtonSegment(value: 'month', label: Text('Month')),
-            ],
-            selected: {_period},
-            onSelectionChanged: (s) { setState(() => _period = s.first); _load(); },
-          ),
-        ]),
-        const SizedBox(height: 16),
-
-        if (_loading)
-          const SizedBox(height: 200, child: Center(child: CircularProgressIndicator()))
-        else ...[
-          // Summary KPIs
-          Row(children: [
-            Expanded(child: _StatBox(label: 'Total Orders', value: '$_totalOrders', icon: Icons.receipt_long, color: AppColors.orderOpen)),
-            const SizedBox(width: 12),
-            Expanded(child: _StatBox(label: 'Total Items Sold', value: '$_totalItems', icon: Icons.shopping_bag, color: AppColors.orderKitchen)),
-            const SizedBox(width: 12),
-            Expanded(child: _StatBox(label: 'Total Sales', value: '$sym ${_totalSales.toStringAsFixed(0)}', icon: Icons.trending_up, color: const Color(0xFF16A34A))),
-          ]),
-          const SizedBox(height: 24),
-
-          // Top 10 selling items
-          AppCard(child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Row(children: [
-              Icon(Icons.star_rounded, size: 20, color: context.cs.primary),
-              const SizedBox(width: 8),
-              Text('Top 10 Selling Items', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-              const Spacer(),
-              Text('${_topItems.length} items', style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant)),
-            ]),
-            const SizedBox(height: 14),
-            if (_topItems.isEmpty)
-              Center(child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text('No items sold in this period', style: TextStyle(color: context.cs.onSurfaceVariant)),
-              ))
-            else
-              ..._topItems.asMap().entries.map((entry) {
-                final rank = entry.key + 1;
-                final item = entry.value;
-                final maxQty = _topItems.first.qty;
-                final pct = maxQty > 0 ? item.qty / maxQty : 0.0;
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: rank <= 3 ? context.cs.primary.withAlpha(8) : context.cardBg,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: rank <= 3 ? context.cs.primary.withAlpha(30) : context.border, width: 0.5),
-                  ),
-                  child: Row(children: [
-                    Container(
-                      width: 28, height: 28,
-                      decoration: BoxDecoration(
-                        color: rank <= 3 ? context.cs.primary : context.cs.onSurfaceVariant.withAlpha(30),
-                        borderRadius: BorderRadius.circular(7),
-                      ),
-                      child: Center(child: Text('$rank', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: rank <= 3 ? Colors.white : context.cs.onSurface))),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(item.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
-                      Text(item.category, style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
-                    ])),
-                    const SizedBox(width: 8),
-                    Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                      Text('${item.qty} sold', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: context.cs.primary)),
-                      Text('$sym ${item.amount.toStringAsFixed(0)}', style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
-                    ]),
-                    const SizedBox(width: 10),
-                    SizedBox(
-                      width: 60,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(3),
-                        child: LinearProgressIndicator(
-                          value: pct, minHeight: 6,
-                          backgroundColor: context.cs.onSurfaceVariant.withAlpha(20),
-                          color: rank <= 3 ? context.cs.primary : context.cs.primary.withAlpha(140),
-                        ),
-                      ),
-                    ),
-                  ]),
-                );
-              }),
-          ])),
-          const SizedBox(height: 16),
-
-          // Top selling categories
-          if (_topGroups.isNotEmpty) AppCard(child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Row(children: [
-              Icon(Icons.category_rounded, size: 20, color: context.cs.primary),
-              const SizedBox(width: 8),
-              Text('Top Selling Categories', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-            ]),
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 10, runSpacing: 10,
-              children: _topGroups.asMap().entries.map((entry) {
-                final rank = entry.key + 1;
-                final g = entry.value;
-                final maxQty = _topGroups.first.qty;
-                final pct = maxQty > 0 ? g.qty / maxQty : 0.0;
-                return Container(
-                  width: 160,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: rank <= 3 ? context.cs.primary.withAlpha(10) : context.cardBg,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: rank <= 3 ? context.cs.primary.withAlpha(40) : context.border, width: 0.5),
-                  ),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Row(children: [
-                      Text('#$rank', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.cs.onSurfaceVariant)),
-                      const SizedBox(width: 6),
-                      Expanded(child: Text(g.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis)),
-                    ]),
-                    const SizedBox(height: 6),
-                    Text('${g.qty} items sold', style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant)),
-                    const SizedBox(height: 6),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(3),
-                      child: LinearProgressIndicator(
-                        value: pct, minHeight: 5,
-                        backgroundColor: context.cs.onSurfaceVariant.withAlpha(20),
-                        color: rank <= 3 ? context.cs.primary : context.cs.primary.withAlpha(140),
-                      ),
-                    ),
-                  ]),
-                );
-              }).toList(),
-            ),
-          ])),
-        ],
-      ]),
-    );
-  }
-}
-
-class _ItemStat {
-  const _ItemStat(this.name, this.qty, this.amount, this.category);
-  final String name;
-  final int qty;
-  final double amount;
-  final String category;
-}
-
-class _GroupStat {
-  const _GroupStat(this.name, this.qty);
-  final String name;
-  final int qty;
 }
 
 class _ZReportTab extends ConsumerStatefulWidget {
