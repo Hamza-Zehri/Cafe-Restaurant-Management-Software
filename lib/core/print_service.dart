@@ -696,9 +696,9 @@ class PrintService {
     final logoImg = await _getLogoImage();
     final sym = _settings.currencySymbol;
 
-    pdf.addPage(pw.MultiPage(
+    pdf.addPage(pw.Page(
       pageFormat: t.pageFormat,
-      build: (ctx) => [pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+      build: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
         t.header(logo: logoImg, name: _settings.name, title: 'Z REPORT', subtitle: '*** SHIFT CLOSED ***'),
         pw.SizedBox(height: 4),
         t.dashedLine(h: 1.2),
@@ -755,7 +755,7 @@ class PrintService {
         t.center('*** END OF DAY — COUNTERS RESET ***', font: thermalBold, size: 9),
         t.center(_df.format(DateTime.now()), font: thermalRegular, size: 8),
         t.credit(thermalRegular, 7),
-      ])],
+      ]),
     ));
     return pdf.save();
   }
@@ -767,9 +767,9 @@ class PrintService {
     final logoImg = await _getLogoImage();
     final sym = _settings.currencySymbol;
 
-    pdf.addPage(pw.MultiPage(
+    pdf.addPage(pw.Page(
       pageFormat: t.pageFormat,
-      build: (ctx) => [pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+      build: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
         t.header(logo: logoImg, name: _settings.name, title: 'X REPORT', subtitle: '*** SHIFT SUMMARY ***'),
         pw.SizedBox(height: 4),
         t.dashedLine(h: 1.2),
@@ -808,7 +808,7 @@ class PrintService {
         t.center('*** X REPORT — CONTINUES ***', font: thermalBold, size: 9),
         t.center(_df.format(DateTime.now()), font: thermalRegular, size: 8),
         t.credit(thermalRegular, 7),
-      ])],
+      ]),
     ));
     return pdf.save();
   }
