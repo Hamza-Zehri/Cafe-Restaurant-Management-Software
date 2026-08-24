@@ -118,7 +118,11 @@ class RestaurantPOSApp extends ConsumerWidget {
         GoRoute(path: '/menu-mgmt', builder: (_, __) => const MenuManagementScreen()),
         GoRoute(path: '/customers', builder: (_, __) => const CustomersScreen()),
         GoRoute(path: '/employees', builder: (_, __) => const EmployeesScreen()),
-        GoRoute(path: '/reports', builder: (_, __) => const ReportsScreen()),
+        GoRoute(path: '/reports', builder: (_, state) {
+          final tabParam = state.uri.queryParameters['tab'];
+          final initialTab = tabParam == 'z' ? 3 : 0;
+          return ReportsScreen(initialTab: initialTab);
+        }),
         GoRoute(path: '/expenses', builder: (_, __) => const ExpenseTrackerScreen()),
         GoRoute(path: '/cash-register', builder: (_, __) => const CashRegisterScreen()),
         GoRoute(path: '/settings', builder: (_, __) => const SettingsScreen()),
@@ -757,7 +761,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final tables = ref.watch(tablesProvider);
-    final orders = ref.watch(activeOrdersProvider);
     final register = ref.watch(registerProvider);
     final settings = ref.watch(settingsProvider);
 
@@ -798,7 +801,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           sliver: SliverList(delegate: SliverChildListDelegate([
             _TrialBanner(),
             const SizedBox(height: 12),
-            _KPIRow(tables: tables, orders: orders, register: register),
+            _KPIRow(tables: tables, register: register),
             const SizedBox(height: 20),
             _TableOverview(tables: tables),
             const SizedBox(height: 20),
@@ -907,7 +910,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             ),
 
             const SizedBox(height: 16),
-            _ActiveOrdersList(orders: orders),
           ])),
         ),
       ]),
@@ -1014,9 +1016,8 @@ class _TrialBannerState extends ConsumerState<_TrialBanner> {
 }
 
 class _KPIRow extends ConsumerWidget {
-  const _KPIRow({required this.tables, required this.orders, required this.register});
+  const _KPIRow({required this.tables, required this.register});
   final AsyncValue<List<TableEntity>> tables;
-  final AsyncValue<List<OrderEntity>> orders;
   final CashRegisterEntity? register;
 
   @override
@@ -1024,9 +1025,10 @@ class _KPIRow extends ConsumerWidget {
     final occupied = tables.valueOrNull?.where((t) => t.isOccupied).length ?? 0;
     final available = tables.valueOrNull?.where((t) => t.isAvailable).length ?? 0;
     final total = tables.valueOrNull?.length ?? 0;
-    final runningOrders = orders.valueOrNull?.where((o) => o.status != OrderStatus.paid && o.status != OrderStatus.cancelled).length ?? 0;
+    final orders = ref.watch(activeOrdersProvider).valueOrNull ?? [];
+    final runningOrders = orders.where((o) => o.status != OrderStatus.paid && o.status != OrderStatus.cancelled).length;
     final totalSales = register?.totalSales ?? 0;
-    final kitchenPending = orders.valueOrNull?.where((o) => o.status == OrderStatus.kitchenSent).length ?? 0;
+    final kitchenPending = orders.where((o) => o.status == OrderStatus.kitchenSent).length;
 
     final kpis = [
       _KPI('Today Sales', '${ref.watch(settingsProvider).currencySymbol} ${totalSales.toStringAsFixed(0)}', Icons.trending_up_rounded, const Color(0xFF1A56DB)),
