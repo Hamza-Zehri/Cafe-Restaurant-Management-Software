@@ -102,7 +102,6 @@ class AuthNotifier extends StateNotifier<AuthState> {
         state = AuthState(user: _map(owner));
         return true;
       }
-      // Fallback: any active user
       final any = rows.where((r) => r.isActive).firstOrNull;
       if (any != null) {
         await _storage.write(key: _key, value: any.id.toString());
