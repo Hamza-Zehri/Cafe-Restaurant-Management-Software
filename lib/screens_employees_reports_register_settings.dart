@@ -151,11 +151,10 @@ class _EmployeesScreenState extends ConsumerState<EmployeesScreen>
             final usesLogin = _roleUsesLogin(role);
             final needsPassword = usesLogin &&
                 (existing == null || _isInternalStaffUsername(existing.email));
-            if (nameCtrl.text.trim().isEmpty) return;
-            if (usesLogin && emailCtrl.text.trim().isEmpty) return;
-            if (needsPassword && passCtrl.text.isEmpty) return;
+            if (nameCtrl.text.trim().isEmpty) { showError(ctx, 'Name is required.'); return; }
+            if (usesLogin && emailCtrl.text.trim().isEmpty) { showError(ctx, 'Username is required.'); return; }
+            if (needsPassword && passCtrl.text.isEmpty) { showError(ctx, 'Password is required.'); return; }
             final db = ref.read(dbProvider);
-            // Admin & manager passwords must be unique (password-only login)
             if (usesLogin && (existing == null || passCtrl.text.isNotEmpty)) {
               final newHash = sha256.convert(utf8.encode(passCtrl.text)).toString();
               final loginUsers = await db.userDao.allUsers();
@@ -169,40 +168,64 @@ class _EmployeesScreenState extends ConsumerState<EmployeesScreen>
                 return;
               }
             }
-            if (existing == null) {
-              final username = usesLogin
-                  ? emailCtrl.text.trim().toLowerCase()
-                  : _internalStaffUsername();
-              final password = usesLogin ? passCtrl.text : _internalStaffPassword();
-              final hash = sha256.convert(utf8.encode(password)).toString();
-              await db.userDao.insert_(UsersCompanion.insert(
-                name: nameCtrl.text.trim(), email: username,
-                passwordHash: hash, role: role.name,
-                phone: Value(phoneCtrl.text.isEmpty ? null : phoneCtrl.text),
-                salary: Value(double.tryParse(salCtrl.text) ?? 0),
-                wageType: Value(wageType.name),
-                photoPath: Value(photoPath),
-              ));
-            } else {
-              final Value<String> updatedUsername = usesLogin
-                  ? Value(emailCtrl.text.trim().toLowerCase())
-                  : Value(_isInternalStaffUsername(existing.email)
-                      ? existing.email
-                      : _internalStaffUsername(existing.id));
-              final Value<String> updatedPassword = passCtrl.text.isEmpty
-                  ? const Value<String>.absent()
-                  : Value(sha256.convert(utf8.encode(passCtrl.text)).toString());
-              await db.userDao.update_(UsersCompanion(
-                id: Value(existing.id), name: Value(nameCtrl.text.trim()),
-                email: updatedUsername,
-                passwordHash: updatedPassword,
-                phone: Value(phoneCtrl.text.isEmpty ? null : phoneCtrl.text),
-                salary: Value(double.tryParse(salCtrl.text) ?? 0),
-                wageType: Value(wageType.name), role: Value(role.name),
-                photoPath: Value(photoPath),
-              ));
+            try {
+              if (existing == null) {
+                final username = usesLogin
+                    ? emailCtrl.text.trim().toLowerCase()
+                    : _internalStaffUsername();
+                final password = usesLogin ? passCtrl.text : _internalStaffPassword();
+                final hash = sha256.convert(utf8.encode(password)).toString();
+                final allUsers = await db.userDao.allUsers();
+                final inactive = allUsers.where((u) => !u.isActive && u.email == username).firstOrNull;
+                if (inactive != null) {
+                  await db.userDao.update_(UsersCompanion(
+                    id: Value(inactive.id), name: Value(nameCtrl.text.trim()),
+                    email: Value(username), passwordHash: Value(hash),
+                    role: Value(role.name),
+                    phone: Value(phoneCtrl.text.isEmpty ? null : phoneCtrl.text),
+                    salary: Value(double.tryParse(salCtrl.text) ?? 0),
+                    wageType: Value(wageType.name), isActive: const Value(true),
+                    photoPath: Value(photoPath),
+                  ));
+                } else {
+                  await db.userDao.insert_(UsersCompanion.insert(
+                    name: nameCtrl.text.trim(), email: username,
+                    passwordHash: hash, role: role.name,
+                    phone: Value(phoneCtrl.text.isEmpty ? null : phoneCtrl.text),
+                    salary: Value(double.tryParse(salCtrl.text) ?? 0),
+                    wageType: Value(wageType.name),
+                    photoPath: Value(photoPath),
+                  ));
+                }
+              } else {
+                final Value<String> updatedUsername = usesLogin
+                    ? Value(emailCtrl.text.trim().toLowerCase())
+                    : Value(_isInternalStaffUsername(existing.email)
+                        ? existing.email
+                        : _internalStaffUsername(existing.id));
+                final Value<String> updatedPassword = passCtrl.text.isEmpty
+                    ? const Value<String>.absent()
+                    : Value(sha256.convert(utf8.encode(passCtrl.text)).toString());
+                await db.userDao.update_(UsersCompanion(
+                  id: Value(existing.id), name: Value(nameCtrl.text.trim()),
+                  email: updatedUsername,
+                  passwordHash: updatedPassword,
+                  phone: Value(phoneCtrl.text.isEmpty ? null : phoneCtrl.text),
+                  salary: Value(double.tryParse(salCtrl.text) ?? 0),
+                  wageType: Value(wageType.name), role: Value(role.name),
+                  photoPath: Value(photoPath),
+                ));
+              }
+              if (ctx.mounted) { Navigator.pop(ctx); showSuccess(ctx, existing == null ? 'Staff added' : 'Updated'); }
+            } catch (e) {
+              if (ctx.mounted) {
+                if (e.toString().contains('UNIQUE') || e.toString().contains('unique')) {
+                  showError(ctx, 'A staff member with this username already exists. Choose a different one.');
+                } else {
+                  showError(ctx, 'Failed to save: ${e.toString().replaceAll('Exception: ', '')}');
+                }
+              }
             }
-            if (ctx.mounted) { Navigator.pop(ctx); showSuccess(ctx, existing == null ? 'Staff added' : 'Updated'); }
           },
           child: Text(existing == null ? 'Add staff' : 'Save'),
         ),
