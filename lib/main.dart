@@ -118,11 +118,7 @@ class RestaurantPOSApp extends ConsumerWidget {
         GoRoute(path: '/menu-mgmt', builder: (_, __) => const MenuManagementScreen()),
         GoRoute(path: '/customers', builder: (_, __) => const CustomersScreen()),
         GoRoute(path: '/employees', builder: (_, __) => const EmployeesScreen()),
-        GoRoute(path: '/reports', builder: (_, state) {
-          final tabParam = state.uri.queryParameters['tab'];
-          final initialTab = tabParam == 'z' ? 3 : 0;
-          return ReportsScreen(initialTab: initialTab);
-        }),
+        GoRoute(path: '/reports', builder: (_, __) => const ReportsScreen()),
         GoRoute(path: '/expenses', builder: (_, __) => const ExpenseTrackerScreen()),
         GoRoute(path: '/cash-register', builder: (_, __) => const CashRegisterScreen()),
         GoRoute(path: '/settings', builder: (_, __) => const SettingsScreen()),

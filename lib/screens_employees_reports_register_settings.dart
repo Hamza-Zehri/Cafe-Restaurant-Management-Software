@@ -770,37 +770,39 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => context.go('/dashboard')),
         title: const Text('Reports & Analytics'),
         actions: [
-          OutlinedButton.icon(
-            icon: const Icon(Icons.date_range_rounded, size: 16),
-            label: Text('${DateFormat('dd MMM').format(_range.start)} — ${DateFormat('dd MMM').format(_range.end)}'),
-            onPressed: _pickDateRange,
-          ),
-          const SizedBox(width: 8),
-          PopupMenuButton<String>(
-            initialValue: 'today',
-            onSelected: (v) => setState(() {
-              final now = DateTime.now();
-              final today = DateTime(now.year, now.month, now.day);
-              _range = switch(v) {
-                'today'   => DateTimeRange(start: today, end: now),
-                'week'    => DateTimeRange(start: today.subtract(const Duration(days: 7)), end: now),
-                'month'   => DateTimeRange(start: DateTime(now.year, now.month, 1), end: now),
-                'year'    => DateTimeRange(start: DateTime(now.year, 1, 1), end: now),
-                _         => DateTimeRange(start: today, end: now),
-              };
-            }),
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'today',  child: Text('Today')),
-              PopupMenuItem(value: 'week',   child: Text('Last 7 days')),
-              PopupMenuItem(value: 'month',  child: Text('This month')),
-              PopupMenuItem(value: 'year',   child: Text('This year')),
-            ],
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 6),
-              child: Icon(Icons.keyboard_arrow_down),
+          if (_tab.index == 1) ...[
+            OutlinedButton.icon(
+              icon: const Icon(Icons.date_range_rounded, size: 16),
+              label: Text('${DateFormat('dd MMM').format(_range.start)} — ${DateFormat('dd MMM').format(_range.end)}'),
+              onPressed: _pickDateRange,
             ),
-          ),
-          const SizedBox(width: 8),
+            const SizedBox(width: 8),
+            PopupMenuButton<String>(
+              initialValue: 'today',
+              onSelected: (v) => setState(() {
+                final now = DateTime.now();
+                final today = DateTime(now.year, now.month, now.day);
+                _range = switch(v) {
+                  'today'   => DateTimeRange(start: today, end: now),
+                  'week'    => DateTimeRange(start: today.subtract(const Duration(days: 7)), end: now),
+                  'month'   => DateTimeRange(start: DateTime(now.year, now.month, 1), end: now),
+                  'year'    => DateTimeRange(start: DateTime(now.year, 1, 1), end: now),
+                  _         => DateTimeRange(start: today, end: now),
+                };
+              }),
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'today',  child: Text('Today')),
+                PopupMenuItem(value: 'week',   child: Text('Last 7 days')),
+                PopupMenuItem(value: 'month',  child: Text('This month')),
+                PopupMenuItem(value: 'year',   child: Text('This year')),
+              ],
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 6),
+                child: Icon(Icons.keyboard_arrow_down),
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
           const TopBarActions(),
         ],
         bottom: TabBar(
@@ -2639,7 +2641,7 @@ class _OpenRegisterPanel extends ConsumerWidget {
           FilledButton.icon(
             icon: const Icon(Icons.lock_rounded, size: 16),
             label: const Text('Close Register (Z Report)'),
-            onPressed: () => context.go('/reports?tab=z'),
+            onPressed: () => context.go('/reports'),
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
           ),
         ]),
