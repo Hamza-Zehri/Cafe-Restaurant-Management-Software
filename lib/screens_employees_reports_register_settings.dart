@@ -770,7 +770,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => context.go('/dashboard')),
         title: const Text('Reports & Analytics'),
         actions: [
-          if (_tab.index == 1) ...[
+          if (_tab.index == 0) ...[
             OutlinedButton.icon(
               icon: const Icon(Icons.date_range_rounded, size: 16),
               label: Text('${DateFormat('dd MMM').format(_range.start)} — ${DateFormat('dd MMM').format(_range.end)}'),
@@ -807,12 +807,12 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
         ],
         bottom: TabBar(
           controller: _tab,
-          tabs: const [Tab(text: 'X Report'), Tab(text: 'Sales Summary'), Tab(text: 'Z Report')],
+          tabs: const [Tab(text: 'Sales Summary'), Tab(text: 'X Report'), Tab(text: 'Z Report')],
         ),
       ),
       body: TabBarView(controller: _tab, children: [
-        _XReportHistoryTab(),
         _SalesSummaryTab(range: _range),
+        _XReportHistoryTab(),
         _ZReportTab(),
       ]),
     ));
