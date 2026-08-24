@@ -2646,7 +2646,7 @@ class _OpenRegisterPanel extends ConsumerWidget {
           FilledButton.icon(
             icon: const Icon(Icons.lock_rounded, size: 16),
             label: const Text('Close Register (Z Report)'),
-            onPressed: () => context.go('/reports'),
+            onPressed: () => context.go('/reports?tab=z'),
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
           ),
         ]),
