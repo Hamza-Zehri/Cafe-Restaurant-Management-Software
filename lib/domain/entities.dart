@@ -200,17 +200,20 @@ class OrderItemEntity {
   const OrderItemEntity({
     required this.id, required this.orderId, required this.menuItem,
     required this.quantity, required this.unitPrice,
+    this.costPrice = 0,
     this.notes = '', this.status = OrderItemStatus.pending,
     this.modifiers = const [], this.isVoided = false,
     this.sentToKitchenAt,
     this.dealId,
     this.dealItemsJson,
+    this.isCustomItem = false,
   });
   final int id;
   final int orderId;
   final MenuItemEntity menuItem;
   final int quantity;
   final double unitPrice;
+  final double costPrice;
   final String notes;
   final OrderItemStatus status;
   final List<OrderModifier> modifiers;
@@ -218,6 +221,7 @@ class OrderItemEntity {
   final DateTime? sentToKitchenAt;
   final int? dealId;
   final String? dealItemsJson;
+  final bool isCustomItem;
 
   bool get isDeal => dealId != null;
 
@@ -240,12 +244,12 @@ class OrderItemEntity {
 
   OrderItemEntity copyWith({int? quantity, OrderItemStatus? status, String? notes, bool? isVoided}) =>
     OrderItemEntity(id: id, orderId: orderId, menuItem: menuItem,
-      quantity: quantity ?? this.quantity, unitPrice: unitPrice,
+      quantity: quantity ?? this.quantity, unitPrice: unitPrice, costPrice: costPrice,
       notes: notes ?? this.notes, status: status ?? this.status,
       modifiers: modifiers, isVoided: isVoided ?? this.isVoided,
       sentToKitchenAt: sentToKitchenAt,
       dealId: dealId,
-      dealItemsJson: dealItemsJson);
+      dealItemsJson: dealItemsJson, isCustomItem: isCustomItem);
 }
 
 class OrderEntity {

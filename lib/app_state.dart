@@ -316,12 +316,13 @@ Future<OrderEntity> _buildOrder(AppDatabase db, OrderRow r) async {
     } catch (_) {}
     return OrderItemEntity(
       id: i.id, orderId: i.orderId,
-      menuItem: MenuItemEntity(id: i.menuItemId, groupId: 0, groupName: '', name: i.menuItemName, price: i.unitPrice),
-      quantity: i.quantity, unitPrice: i.unitPrice, notes: i.notes,
+      menuItem: MenuItemEntity(id: i.menuItemId ?? 0, groupId: 0, groupName: '', name: i.menuItemName, price: i.unitPrice, costPrice: i.costPrice),
+      quantity: i.quantity, unitPrice: i.unitPrice, costPrice: i.costPrice, notes: i.notes,
       status: _itemStatus(i.status), modifiers: mods, isVoided: i.isVoided,
       sentToKitchenAt: i.sentToKitchenAt,
       dealId: i.dealId,
       dealItemsJson: i.dealItemsJson,
+      isCustomItem: i.isCustomItem,
     );
   }).toList();
   return OrderEntity(
@@ -417,11 +418,23 @@ class POSNotifier extends StateNotifier<AsyncValue<OrderEntity?>> {
       ));
     } else {
       await _db.orderDao.insertItem(OrderItemsCompanion.insert(
-        orderId: o.id, menuItemId: item.id, menuItemName: item.name,
-        unitPrice: item.price, quantity: qty,
+        orderId: o.id, menuItemId: Value(item.id), menuItemName: item.name,
+        unitPrice: item.price, costPrice: Value(item.costPrice), quantity: qty,
         notes: Value(notes), modifiersJson: Value(modJson),
       ));
     }
+    await _refreshRunningTotal();
+    await _load();
+  }
+
+  // ── Add custom item (not in menu) ────────────────
+  Future<void> addCustomItem(String name, double salePrice, double costPrice, {int qty = 1, String notes = ''}) async {
+    final o = await _ensureOrder(1);
+    await _db.orderDao.insertItem(OrderItemsCompanion.insert(
+      orderId: o.id, menuItemId: const Value.absent(), menuItemName: name,
+      unitPrice: salePrice, costPrice: Value(costPrice), quantity: qty,
+      notes: Value(notes), isCustomItem: const Value(true),
+    ));
     await _refreshRunningTotal();
     await _load();
   }
@@ -442,7 +455,7 @@ class POSNotifier extends StateNotifier<AsyncValue<OrderEntity?>> {
 
     await _db.orderDao.insertItem(OrderItemsCompanion.insert(
       orderId: o.id,
-      menuItemId: firstMenuItemId,
+      menuItemId: Value(firstMenuItemId),
       menuItemName: deal.name,
       unitPrice: deal.price,
       quantity: 1,

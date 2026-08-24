@@ -3939,9 +3939,9 @@ class $OrderItemsTable extends OrderItems
       const VerificationMeta('menuItemId');
   @override
   late final GeneratedColumn<int> menuItemId = GeneratedColumn<int>(
-      'menu_item_id', aliasedName, false,
+      'menu_item_id', aliasedName, true,
       type: DriftSqlType.int,
-      requiredDuringInsert: true,
+      requiredDuringInsert: false,
       defaultConstraints:
           GeneratedColumn.constraintIsAlways('REFERENCES menu_items (id)'));
   static const VerificationMeta _menuItemNameMeta =
@@ -3956,6 +3956,14 @@ class $OrderItemsTable extends OrderItems
   late final GeneratedColumn<double> unitPrice = GeneratedColumn<double>(
       'unit_price', aliasedName, false,
       type: DriftSqlType.double, requiredDuringInsert: true);
+  static const VerificationMeta _costPriceMeta =
+      const VerificationMeta('costPrice');
+  @override
+  late final GeneratedColumn<double> costPrice = GeneratedColumn<double>(
+      'cost_price', aliasedName, false,
+      type: DriftSqlType.double,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(0.0));
   static const VerificationMeta _quantityMeta =
       const VerificationMeta('quantity');
   @override
@@ -4014,6 +4022,16 @@ class $OrderItemsTable extends OrderItems
   late final GeneratedColumn<String> dealItemsJson = GeneratedColumn<String>(
       'deal_items_json', aliasedName, true,
       type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _isCustomItemMeta =
+      const VerificationMeta('isCustomItem');
+  @override
+  late final GeneratedColumn<bool> isCustomItem = GeneratedColumn<bool>(
+      'is_custom_item', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints: GeneratedColumn.constraintIsAlways(
+          'CHECK ("is_custom_item" IN (0, 1))'),
+      defaultValue: const Constant(false));
   @override
   List<GeneratedColumn> get $columns => [
         id,
@@ -4021,6 +4039,7 @@ class $OrderItemsTable extends OrderItems
         menuItemId,
         menuItemName,
         unitPrice,
+        costPrice,
         quantity,
         notes,
         status,
@@ -4028,7 +4047,8 @@ class $OrderItemsTable extends OrderItems
         isVoided,
         sentToKitchenAt,
         dealId,
-        dealItemsJson
+        dealItemsJson,
+        isCustomItem
       ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -4054,8 +4074,6 @@ class $OrderItemsTable extends OrderItems
           _menuItemIdMeta,
           menuItemId.isAcceptableOrUnknown(
               data['menu_item_id']!, _menuItemIdMeta));
-    } else if (isInserting) {
-      context.missing(_menuItemIdMeta);
     }
     if (data.containsKey('menu_item_name')) {
       context.handle(
@@ -4070,6 +4088,10 @@ class $OrderItemsTable extends OrderItems
           unitPrice.isAcceptableOrUnknown(data['unit_price']!, _unitPriceMeta));
     } else if (isInserting) {
       context.missing(_unitPriceMeta);
+    }
+    if (data.containsKey('cost_price')) {
+      context.handle(_costPriceMeta,
+          costPrice.isAcceptableOrUnknown(data['cost_price']!, _costPriceMeta));
     }
     if (data.containsKey('quantity')) {
       context.handle(_quantityMeta,
@@ -4111,6 +4133,12 @@ class $OrderItemsTable extends OrderItems
           dealItemsJson.isAcceptableOrUnknown(
               data['deal_items_json']!, _dealItemsJsonMeta));
     }
+    if (data.containsKey('is_custom_item')) {
+      context.handle(
+          _isCustomItemMeta,
+          isCustomItem.isAcceptableOrUnknown(
+              data['is_custom_item']!, _isCustomItemMeta));
+    }
     return context;
   }
 
@@ -4125,11 +4153,13 @@ class $OrderItemsTable extends OrderItems
       orderId: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}order_id'])!,
       menuItemId: attachedDatabase.typeMapping
-          .read(DriftSqlType.int, data['${effectivePrefix}menu_item_id'])!,
+          .read(DriftSqlType.int, data['${effectivePrefix}menu_item_id']),
       menuItemName: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}menu_item_name'])!,
       unitPrice: attachedDatabase.typeMapping
           .read(DriftSqlType.double, data['${effectivePrefix}unit_price'])!,
+      costPrice: attachedDatabase.typeMapping
+          .read(DriftSqlType.double, data['${effectivePrefix}cost_price'])!,
       quantity: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}quantity'])!,
       notes: attachedDatabase.typeMapping
@@ -4146,6 +4176,8 @@ class $OrderItemsTable extends OrderItems
           .read(DriftSqlType.int, data['${effectivePrefix}deal_id']),
       dealItemsJson: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}deal_items_json']),
+      isCustomItem: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}is_custom_item'])!,
     );
   }
 
@@ -4158,9 +4190,10 @@ class $OrderItemsTable extends OrderItems
 class OrderItem extends DataClass implements Insertable<OrderItem> {
   final int id;
   final int orderId;
-  final int menuItemId;
+  final int? menuItemId;
   final String menuItemName;
   final double unitPrice;
+  final double costPrice;
   final int quantity;
   final String notes;
   final String status;
@@ -4169,12 +4202,14 @@ class OrderItem extends DataClass implements Insertable<OrderItem> {
   final DateTime? sentToKitchenAt;
   final int? dealId;
   final String? dealItemsJson;
+  final bool isCustomItem;
   const OrderItem(
       {required this.id,
       required this.orderId,
-      required this.menuItemId,
+      this.menuItemId,
       required this.menuItemName,
       required this.unitPrice,
+      required this.costPrice,
       required this.quantity,
       required this.notes,
       required this.status,
@@ -4182,15 +4217,19 @@ class OrderItem extends DataClass implements Insertable<OrderItem> {
       required this.isVoided,
       this.sentToKitchenAt,
       this.dealId,
-      this.dealItemsJson});
+      this.dealItemsJson,
+      required this.isCustomItem});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<int>(id);
     map['order_id'] = Variable<int>(orderId);
-    map['menu_item_id'] = Variable<int>(menuItemId);
+    if (!nullToAbsent || menuItemId != null) {
+      map['menu_item_id'] = Variable<int>(menuItemId);
+    }
     map['menu_item_name'] = Variable<String>(menuItemName);
     map['unit_price'] = Variable<double>(unitPrice);
+    map['cost_price'] = Variable<double>(costPrice);
     map['quantity'] = Variable<int>(quantity);
     map['notes'] = Variable<String>(notes);
     map['status'] = Variable<String>(status);
@@ -4205,6 +4244,7 @@ class OrderItem extends DataClass implements Insertable<OrderItem> {
     if (!nullToAbsent || dealItemsJson != null) {
       map['deal_items_json'] = Variable<String>(dealItemsJson);
     }
+    map['is_custom_item'] = Variable<bool>(isCustomItem);
     return map;
   }
 
@@ -4212,9 +4252,12 @@ class OrderItem extends DataClass implements Insertable<OrderItem> {
     return OrderItemsCompanion(
       id: Value(id),
       orderId: Value(orderId),
-      menuItemId: Value(menuItemId),
+      menuItemId: menuItemId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(menuItemId),
       menuItemName: Value(menuItemName),
       unitPrice: Value(unitPrice),
+      costPrice: Value(costPrice),
       quantity: Value(quantity),
       notes: Value(notes),
       status: Value(status),
@@ -4228,6 +4271,7 @@ class OrderItem extends DataClass implements Insertable<OrderItem> {
       dealItemsJson: dealItemsJson == null && nullToAbsent
           ? const Value.absent()
           : Value(dealItemsJson),
+      isCustomItem: Value(isCustomItem),
     );
   }
 
@@ -4237,9 +4281,10 @@ class OrderItem extends DataClass implements Insertable<OrderItem> {
     return OrderItem(
       id: serializer.fromJson<int>(json['id']),
       orderId: serializer.fromJson<int>(json['orderId']),
-      menuItemId: serializer.fromJson<int>(json['menuItemId']),
+      menuItemId: serializer.fromJson<int?>(json['menuItemId']),
       menuItemName: serializer.fromJson<String>(json['menuItemName']),
       unitPrice: serializer.fromJson<double>(json['unitPrice']),
+      costPrice: serializer.fromJson<double>(json['costPrice']),
       quantity: serializer.fromJson<int>(json['quantity']),
       notes: serializer.fromJson<String>(json['notes']),
       status: serializer.fromJson<String>(json['status']),
@@ -4248,6 +4293,7 @@ class OrderItem extends DataClass implements Insertable<OrderItem> {
       sentToKitchenAt: serializer.fromJson<DateTime?>(json['sentToKitchenAt']),
       dealId: serializer.fromJson<int?>(json['dealId']),
       dealItemsJson: serializer.fromJson<String?>(json['dealItemsJson']),
+      isCustomItem: serializer.fromJson<bool>(json['isCustomItem']),
     );
   }
   @override
@@ -4256,9 +4302,10 @@ class OrderItem extends DataClass implements Insertable<OrderItem> {
     return <String, dynamic>{
       'id': serializer.toJson<int>(id),
       'orderId': serializer.toJson<int>(orderId),
-      'menuItemId': serializer.toJson<int>(menuItemId),
+      'menuItemId': serializer.toJson<int?>(menuItemId),
       'menuItemName': serializer.toJson<String>(menuItemName),
       'unitPrice': serializer.toJson<double>(unitPrice),
+      'costPrice': serializer.toJson<double>(costPrice),
       'quantity': serializer.toJson<int>(quantity),
       'notes': serializer.toJson<String>(notes),
       'status': serializer.toJson<String>(status),
@@ -4267,15 +4314,17 @@ class OrderItem extends DataClass implements Insertable<OrderItem> {
       'sentToKitchenAt': serializer.toJson<DateTime?>(sentToKitchenAt),
       'dealId': serializer.toJson<int?>(dealId),
       'dealItemsJson': serializer.toJson<String?>(dealItemsJson),
+      'isCustomItem': serializer.toJson<bool>(isCustomItem),
     };
   }
 
   OrderItem copyWith(
           {int? id,
           int? orderId,
-          int? menuItemId,
+          Value<int?> menuItemId = const Value.absent(),
           String? menuItemName,
           double? unitPrice,
+          double? costPrice,
           int? quantity,
           String? notes,
           String? status,
@@ -4283,13 +4332,15 @@ class OrderItem extends DataClass implements Insertable<OrderItem> {
           bool? isVoided,
           Value<DateTime?> sentToKitchenAt = const Value.absent(),
           Value<int?> dealId = const Value.absent(),
-          Value<String?> dealItemsJson = const Value.absent()}) =>
+          Value<String?> dealItemsJson = const Value.absent(),
+          bool? isCustomItem}) =>
       OrderItem(
         id: id ?? this.id,
         orderId: orderId ?? this.orderId,
-        menuItemId: menuItemId ?? this.menuItemId,
+        menuItemId: menuItemId.present ? menuItemId.value : this.menuItemId,
         menuItemName: menuItemName ?? this.menuItemName,
         unitPrice: unitPrice ?? this.unitPrice,
+        costPrice: costPrice ?? this.costPrice,
         quantity: quantity ?? this.quantity,
         notes: notes ?? this.notes,
         status: status ?? this.status,
@@ -4301,6 +4352,7 @@ class OrderItem extends DataClass implements Insertable<OrderItem> {
         dealId: dealId.present ? dealId.value : this.dealId,
         dealItemsJson:
             dealItemsJson.present ? dealItemsJson.value : this.dealItemsJson,
+        isCustomItem: isCustomItem ?? this.isCustomItem,
       );
   OrderItem copyWithCompanion(OrderItemsCompanion data) {
     return OrderItem(
@@ -4312,6 +4364,7 @@ class OrderItem extends DataClass implements Insertable<OrderItem> {
           ? data.menuItemName.value
           : this.menuItemName,
       unitPrice: data.unitPrice.present ? data.unitPrice.value : this.unitPrice,
+      costPrice: data.costPrice.present ? data.costPrice.value : this.costPrice,
       quantity: data.quantity.present ? data.quantity.value : this.quantity,
       notes: data.notes.present ? data.notes.value : this.notes,
       status: data.status.present ? data.status.value : this.status,
@@ -4326,6 +4379,9 @@ class OrderItem extends DataClass implements Insertable<OrderItem> {
       dealItemsJson: data.dealItemsJson.present
           ? data.dealItemsJson.value
           : this.dealItemsJson,
+      isCustomItem: data.isCustomItem.present
+          ? data.isCustomItem.value
+          : this.isCustomItem,
     );
   }
 
@@ -4337,6 +4393,7 @@ class OrderItem extends DataClass implements Insertable<OrderItem> {
           ..write('menuItemId: $menuItemId, ')
           ..write('menuItemName: $menuItemName, ')
           ..write('unitPrice: $unitPrice, ')
+          ..write('costPrice: $costPrice, ')
           ..write('quantity: $quantity, ')
           ..write('notes: $notes, ')
           ..write('status: $status, ')
@@ -4344,7 +4401,8 @@ class OrderItem extends DataClass implements Insertable<OrderItem> {
           ..write('isVoided: $isVoided, ')
           ..write('sentToKitchenAt: $sentToKitchenAt, ')
           ..write('dealId: $dealId, ')
-          ..write('dealItemsJson: $dealItemsJson')
+          ..write('dealItemsJson: $dealItemsJson, ')
+          ..write('isCustomItem: $isCustomItem')
           ..write(')'))
         .toString();
   }
@@ -4356,6 +4414,7 @@ class OrderItem extends DataClass implements Insertable<OrderItem> {
       menuItemId,
       menuItemName,
       unitPrice,
+      costPrice,
       quantity,
       notes,
       status,
@@ -4363,7 +4422,8 @@ class OrderItem extends DataClass implements Insertable<OrderItem> {
       isVoided,
       sentToKitchenAt,
       dealId,
-      dealItemsJson);
+      dealItemsJson,
+      isCustomItem);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -4373,6 +4433,7 @@ class OrderItem extends DataClass implements Insertable<OrderItem> {
           other.menuItemId == this.menuItemId &&
           other.menuItemName == this.menuItemName &&
           other.unitPrice == this.unitPrice &&
+          other.costPrice == this.costPrice &&
           other.quantity == this.quantity &&
           other.notes == this.notes &&
           other.status == this.status &&
@@ -4380,15 +4441,17 @@ class OrderItem extends DataClass implements Insertable<OrderItem> {
           other.isVoided == this.isVoided &&
           other.sentToKitchenAt == this.sentToKitchenAt &&
           other.dealId == this.dealId &&
-          other.dealItemsJson == this.dealItemsJson);
+          other.dealItemsJson == this.dealItemsJson &&
+          other.isCustomItem == this.isCustomItem);
 }
 
 class OrderItemsCompanion extends UpdateCompanion<OrderItem> {
   final Value<int> id;
   final Value<int> orderId;
-  final Value<int> menuItemId;
+  final Value<int?> menuItemId;
   final Value<String> menuItemName;
   final Value<double> unitPrice;
+  final Value<double> costPrice;
   final Value<int> quantity;
   final Value<String> notes;
   final Value<String> status;
@@ -4397,12 +4460,14 @@ class OrderItemsCompanion extends UpdateCompanion<OrderItem> {
   final Value<DateTime?> sentToKitchenAt;
   final Value<int?> dealId;
   final Value<String?> dealItemsJson;
+  final Value<bool> isCustomItem;
   const OrderItemsCompanion({
     this.id = const Value.absent(),
     this.orderId = const Value.absent(),
     this.menuItemId = const Value.absent(),
     this.menuItemName = const Value.absent(),
     this.unitPrice = const Value.absent(),
+    this.costPrice = const Value.absent(),
     this.quantity = const Value.absent(),
     this.notes = const Value.absent(),
     this.status = const Value.absent(),
@@ -4411,13 +4476,15 @@ class OrderItemsCompanion extends UpdateCompanion<OrderItem> {
     this.sentToKitchenAt = const Value.absent(),
     this.dealId = const Value.absent(),
     this.dealItemsJson = const Value.absent(),
+    this.isCustomItem = const Value.absent(),
   });
   OrderItemsCompanion.insert({
     this.id = const Value.absent(),
     required int orderId,
-    required int menuItemId,
+    this.menuItemId = const Value.absent(),
     required String menuItemName,
     required double unitPrice,
+    this.costPrice = const Value.absent(),
     required int quantity,
     this.notes = const Value.absent(),
     this.status = const Value.absent(),
@@ -4426,8 +4493,8 @@ class OrderItemsCompanion extends UpdateCompanion<OrderItem> {
     this.sentToKitchenAt = const Value.absent(),
     this.dealId = const Value.absent(),
     this.dealItemsJson = const Value.absent(),
+    this.isCustomItem = const Value.absent(),
   })  : orderId = Value(orderId),
-        menuItemId = Value(menuItemId),
         menuItemName = Value(menuItemName),
         unitPrice = Value(unitPrice),
         quantity = Value(quantity);
@@ -4437,6 +4504,7 @@ class OrderItemsCompanion extends UpdateCompanion<OrderItem> {
     Expression<int>? menuItemId,
     Expression<String>? menuItemName,
     Expression<double>? unitPrice,
+    Expression<double>? costPrice,
     Expression<int>? quantity,
     Expression<String>? notes,
     Expression<String>? status,
@@ -4445,6 +4513,7 @@ class OrderItemsCompanion extends UpdateCompanion<OrderItem> {
     Expression<DateTime>? sentToKitchenAt,
     Expression<int>? dealId,
     Expression<String>? dealItemsJson,
+    Expression<bool>? isCustomItem,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -4452,6 +4521,7 @@ class OrderItemsCompanion extends UpdateCompanion<OrderItem> {
       if (menuItemId != null) 'menu_item_id': menuItemId,
       if (menuItemName != null) 'menu_item_name': menuItemName,
       if (unitPrice != null) 'unit_price': unitPrice,
+      if (costPrice != null) 'cost_price': costPrice,
       if (quantity != null) 'quantity': quantity,
       if (notes != null) 'notes': notes,
       if (status != null) 'status': status,
@@ -4460,15 +4530,17 @@ class OrderItemsCompanion extends UpdateCompanion<OrderItem> {
       if (sentToKitchenAt != null) 'sent_to_kitchen_at': sentToKitchenAt,
       if (dealId != null) 'deal_id': dealId,
       if (dealItemsJson != null) 'deal_items_json': dealItemsJson,
+      if (isCustomItem != null) 'is_custom_item': isCustomItem,
     });
   }
 
   OrderItemsCompanion copyWith(
       {Value<int>? id,
       Value<int>? orderId,
-      Value<int>? menuItemId,
+      Value<int?>? menuItemId,
       Value<String>? menuItemName,
       Value<double>? unitPrice,
+      Value<double>? costPrice,
       Value<int>? quantity,
       Value<String>? notes,
       Value<String>? status,
@@ -4476,13 +4548,15 @@ class OrderItemsCompanion extends UpdateCompanion<OrderItem> {
       Value<bool>? isVoided,
       Value<DateTime?>? sentToKitchenAt,
       Value<int?>? dealId,
-      Value<String?>? dealItemsJson}) {
+      Value<String?>? dealItemsJson,
+      Value<bool>? isCustomItem}) {
     return OrderItemsCompanion(
       id: id ?? this.id,
       orderId: orderId ?? this.orderId,
       menuItemId: menuItemId ?? this.menuItemId,
       menuItemName: menuItemName ?? this.menuItemName,
       unitPrice: unitPrice ?? this.unitPrice,
+      costPrice: costPrice ?? this.costPrice,
       quantity: quantity ?? this.quantity,
       notes: notes ?? this.notes,
       status: status ?? this.status,
@@ -4491,6 +4565,7 @@ class OrderItemsCompanion extends UpdateCompanion<OrderItem> {
       sentToKitchenAt: sentToKitchenAt ?? this.sentToKitchenAt,
       dealId: dealId ?? this.dealId,
       dealItemsJson: dealItemsJson ?? this.dealItemsJson,
+      isCustomItem: isCustomItem ?? this.isCustomItem,
     );
   }
 
@@ -4511,6 +4586,9 @@ class OrderItemsCompanion extends UpdateCompanion<OrderItem> {
     }
     if (unitPrice.present) {
       map['unit_price'] = Variable<double>(unitPrice.value);
+    }
+    if (costPrice.present) {
+      map['cost_price'] = Variable<double>(costPrice.value);
     }
     if (quantity.present) {
       map['quantity'] = Variable<int>(quantity.value);
@@ -4536,6 +4614,9 @@ class OrderItemsCompanion extends UpdateCompanion<OrderItem> {
     if (dealItemsJson.present) {
       map['deal_items_json'] = Variable<String>(dealItemsJson.value);
     }
+    if (isCustomItem.present) {
+      map['is_custom_item'] = Variable<bool>(isCustomItem.value);
+    }
     return map;
   }
 
@@ -4547,6 +4628,7 @@ class OrderItemsCompanion extends UpdateCompanion<OrderItem> {
           ..write('menuItemId: $menuItemId, ')
           ..write('menuItemName: $menuItemName, ')
           ..write('unitPrice: $unitPrice, ')
+          ..write('costPrice: $costPrice, ')
           ..write('quantity: $quantity, ')
           ..write('notes: $notes, ')
           ..write('status: $status, ')
@@ -4554,7 +4636,8 @@ class OrderItemsCompanion extends UpdateCompanion<OrderItem> {
           ..write('isVoided: $isVoided, ')
           ..write('sentToKitchenAt: $sentToKitchenAt, ')
           ..write('dealId: $dealId, ')
-          ..write('dealItemsJson: $dealItemsJson')
+          ..write('dealItemsJson: $dealItemsJson, ')
+          ..write('isCustomItem: $isCustomItem')
           ..write(')'))
         .toString();
   }
@@ -13252,9 +13335,10 @@ typedef $$DealsTableProcessedTableManager = ProcessedTableManager<
 typedef $$OrderItemsTableCreateCompanionBuilder = OrderItemsCompanion Function({
   Value<int> id,
   required int orderId,
-  required int menuItemId,
+  Value<int?> menuItemId,
   required String menuItemName,
   required double unitPrice,
+  Value<double> costPrice,
   required int quantity,
   Value<String> notes,
   Value<String> status,
@@ -13263,13 +13347,15 @@ typedef $$OrderItemsTableCreateCompanionBuilder = OrderItemsCompanion Function({
   Value<DateTime?> sentToKitchenAt,
   Value<int?> dealId,
   Value<String?> dealItemsJson,
+  Value<bool> isCustomItem,
 });
 typedef $$OrderItemsTableUpdateCompanionBuilder = OrderItemsCompanion Function({
   Value<int> id,
   Value<int> orderId,
-  Value<int> menuItemId,
+  Value<int?> menuItemId,
   Value<String> menuItemName,
   Value<double> unitPrice,
+  Value<double> costPrice,
   Value<int> quantity,
   Value<String> notes,
   Value<String> status,
@@ -13278,6 +13364,7 @@ typedef $$OrderItemsTableUpdateCompanionBuilder = OrderItemsCompanion Function({
   Value<DateTime?> sentToKitchenAt,
   Value<int?> dealId,
   Value<String?> dealItemsJson,
+  Value<bool> isCustomItem,
 });
 
 final class $$OrderItemsTableReferences
@@ -13302,9 +13389,9 @@ final class $$OrderItemsTableReferences
       db.menuItems.createAlias(
           $_aliasNameGenerator(db.orderItems.menuItemId, db.menuItems.id));
 
-  $$MenuItemsTableProcessedTableManager get menuItemId {
-    final $_column = $_itemColumn<int>('menu_item_id')!;
-
+  $$MenuItemsTableProcessedTableManager? get menuItemId {
+    final $_column = $_itemColumn<int>('menu_item_id');
+    if ($_column == null) return null;
     final manager = $$MenuItemsTableTableManager($_db, $_db.menuItems)
         .filter((f) => f.id.sqlEquals($_column));
     final item = $_typedResult.readTableOrNull(_menuItemIdTable($_db));
@@ -13346,6 +13433,9 @@ class $$OrderItemsTableFilterComposer
   ColumnFilters<double> get unitPrice => $composableBuilder(
       column: $table.unitPrice, builder: (column) => ColumnFilters(column));
 
+  ColumnFilters<double> get costPrice => $composableBuilder(
+      column: $table.costPrice, builder: (column) => ColumnFilters(column));
+
   ColumnFilters<int> get quantity => $composableBuilder(
       column: $table.quantity, builder: (column) => ColumnFilters(column));
 
@@ -13367,6 +13457,9 @@ class $$OrderItemsTableFilterComposer
 
   ColumnFilters<String> get dealItemsJson => $composableBuilder(
       column: $table.dealItemsJson, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get isCustomItem => $composableBuilder(
+      column: $table.isCustomItem, builder: (column) => ColumnFilters(column));
 
   $$OrdersTableFilterComposer get orderId {
     final $$OrdersTableFilterComposer composer = $composerBuilder(
@@ -13448,6 +13541,9 @@ class $$OrderItemsTableOrderingComposer
   ColumnOrderings<double> get unitPrice => $composableBuilder(
       column: $table.unitPrice, builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<double> get costPrice => $composableBuilder(
+      column: $table.costPrice, builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<int> get quantity => $composableBuilder(
       column: $table.quantity, builder: (column) => ColumnOrderings(column));
 
@@ -13470,6 +13566,10 @@ class $$OrderItemsTableOrderingComposer
 
   ColumnOrderings<String> get dealItemsJson => $composableBuilder(
       column: $table.dealItemsJson,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get isCustomItem => $composableBuilder(
+      column: $table.isCustomItem,
       builder: (column) => ColumnOrderings(column));
 
   $$OrdersTableOrderingComposer get orderId {
@@ -13551,6 +13651,9 @@ class $$OrderItemsTableAnnotationComposer
   GeneratedColumn<double> get unitPrice =>
       $composableBuilder(column: $table.unitPrice, builder: (column) => column);
 
+  GeneratedColumn<double> get costPrice =>
+      $composableBuilder(column: $table.costPrice, builder: (column) => column);
+
   GeneratedColumn<int> get quantity =>
       $composableBuilder(column: $table.quantity, builder: (column) => column);
 
@@ -13571,6 +13674,9 @@ class $$OrderItemsTableAnnotationComposer
 
   GeneratedColumn<String> get dealItemsJson => $composableBuilder(
       column: $table.dealItemsJson, builder: (column) => column);
+
+  GeneratedColumn<bool> get isCustomItem => $composableBuilder(
+      column: $table.isCustomItem, builder: (column) => column);
 
   $$OrdersTableAnnotationComposer get orderId {
     final $$OrdersTableAnnotationComposer composer = $composerBuilder(
@@ -13658,9 +13764,10 @@ class $$OrderItemsTableTableManager extends RootTableManager<
           updateCompanionCallback: ({
             Value<int> id = const Value.absent(),
             Value<int> orderId = const Value.absent(),
-            Value<int> menuItemId = const Value.absent(),
+            Value<int?> menuItemId = const Value.absent(),
             Value<String> menuItemName = const Value.absent(),
             Value<double> unitPrice = const Value.absent(),
+            Value<double> costPrice = const Value.absent(),
             Value<int> quantity = const Value.absent(),
             Value<String> notes = const Value.absent(),
             Value<String> status = const Value.absent(),
@@ -13669,6 +13776,7 @@ class $$OrderItemsTableTableManager extends RootTableManager<
             Value<DateTime?> sentToKitchenAt = const Value.absent(),
             Value<int?> dealId = const Value.absent(),
             Value<String?> dealItemsJson = const Value.absent(),
+            Value<bool> isCustomItem = const Value.absent(),
           }) =>
               OrderItemsCompanion(
             id: id,
@@ -13676,6 +13784,7 @@ class $$OrderItemsTableTableManager extends RootTableManager<
             menuItemId: menuItemId,
             menuItemName: menuItemName,
             unitPrice: unitPrice,
+            costPrice: costPrice,
             quantity: quantity,
             notes: notes,
             status: status,
@@ -13684,13 +13793,15 @@ class $$OrderItemsTableTableManager extends RootTableManager<
             sentToKitchenAt: sentToKitchenAt,
             dealId: dealId,
             dealItemsJson: dealItemsJson,
+            isCustomItem: isCustomItem,
           ),
           createCompanionCallback: ({
             Value<int> id = const Value.absent(),
             required int orderId,
-            required int menuItemId,
+            Value<int?> menuItemId = const Value.absent(),
             required String menuItemName,
             required double unitPrice,
+            Value<double> costPrice = const Value.absent(),
             required int quantity,
             Value<String> notes = const Value.absent(),
             Value<String> status = const Value.absent(),
@@ -13699,6 +13810,7 @@ class $$OrderItemsTableTableManager extends RootTableManager<
             Value<DateTime?> sentToKitchenAt = const Value.absent(),
             Value<int?> dealId = const Value.absent(),
             Value<String?> dealItemsJson = const Value.absent(),
+            Value<bool> isCustomItem = const Value.absent(),
           }) =>
               OrderItemsCompanion.insert(
             id: id,
@@ -13706,6 +13818,7 @@ class $$OrderItemsTableTableManager extends RootTableManager<
             menuItemId: menuItemId,
             menuItemName: menuItemName,
             unitPrice: unitPrice,
+            costPrice: costPrice,
             quantity: quantity,
             notes: notes,
             status: status,
@@ -13714,6 +13827,7 @@ class $$OrderItemsTableTableManager extends RootTableManager<
             sentToKitchenAt: sentToKitchenAt,
             dealId: dealId,
             dealItemsJson: dealItemsJson,
+            isCustomItem: isCustomItem,
           ),
           withReferenceMapper: (p0) => p0
               .map((e) => (

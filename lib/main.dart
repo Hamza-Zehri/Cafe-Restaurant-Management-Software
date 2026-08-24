@@ -715,11 +715,47 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 // ═══════════════════════════════════════════════════════
 // DASHBOARD SCREEN
 // ═══════════════════════════════════════════════════════
-class DashboardScreen extends ConsumerWidget {
+class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
+  @override
+  ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends ConsumerState<DashboardScreen> {
+  int _selectedYear = DateTime.now().year;
+  List<CashRegisterRow> _yearRegisters = [];
+  List<CashRegisterRow> _allRegisters = [];
+  bool _loadingStats = true;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  void initState() {
+    super.initState();
+    _loadStats();
+  }
+
+  Future<void> _loadStats() async {
+    final db = ref.read(dbProvider);
+    final yearStart = DateTime(_selectedYear, 1, 1);
+    final yearEnd = DateTime(_selectedYear + 1, 1, 1);
+    final yearRegs = await db.registerDao.historyForPeriod(yearStart, yearEnd);
+    final allRegs = await db.registerDao.history();
+    if (mounted) setState(() { _yearRegisters = yearRegs; _allRegisters = allRegs; _loadingStats = false; });
+  }
+
+  List<double> _monthlySales() {
+    final sales = List<double>.filled(12, 0);
+    for (final r in _yearRegisters) {
+      final m = r.openedAt.month - 1;
+      sales[m] += r.totalCashSales + r.totalCardSales + r.totalWalletSales;
+    }
+    return sales;
+  }
+
+  double get _yearTotal => _yearRegisters.fold(0.0, (s, r) => s + r.totalCashSales + r.totalCardSales + r.totalWalletSales);
+  double get _allTimeTotal => _allRegisters.fold(0.0, (s, r) => s + r.totalCashSales + r.totalCardSales + r.totalWalletSales);
+
+  @override
+  Widget build(BuildContext context) {
     final tables = ref.watch(tablesProvider);
     final orders = ref.watch(activeOrdersProvider);
     final register = ref.watch(registerProvider);
@@ -745,7 +781,7 @@ class DashboardScreen extends ConsumerWidget {
                   style: FilledButton.styleFrom(backgroundColor: Colors.orange),
                 ),
               )
-            else if (register != null)
+            else
               Padding(
                 padding: const EdgeInsets.only(right: 12),
                 child: Chip(
@@ -760,27 +796,155 @@ class DashboardScreen extends ConsumerWidget {
         SliverPadding(
           padding: const EdgeInsets.all(20),
           sliver: SliverList(delegate: SliverChildListDelegate([
-            // ── Trial Banner ─────────────────────────
             _TrialBanner(),
             const SizedBox(height: 12),
-            // ── KPI Row ──────────────────────────────
             _KPIRow(tables: tables, orders: orders, register: register),
             const SizedBox(height: 20),
+            _TableOverview(tables: tables),
+            const SizedBox(height: 20),
 
-            // ── Table Overview + Quick Actions ────────
-            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Expanded(flex: 7, child: _TableOverview(tables: tables)),
-              const SizedBox(width: 16),
-              Expanded(flex: 3, child: _QuickActions()),
-            ]),
+            // ── Sales Chart & Totals ─────────────────
+            AppCard(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Row(children: [
+                  Text('Sales Overview', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: context.border),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: DropdownButton<int>(
+                      value: _selectedYear, underline: const SizedBox(),
+                      isDense: true, style: TextStyle(fontSize: 13, color: context.cs.onSurface),
+                      items: List.generate(10, (i) => DateTime.now().year - 5 + i)
+                        .map((y) => DropdownMenuItem(value: y, child: Text('$y'))).toList(),
+                      onChanged: (v) { if (v != null) setState(() { _selectedYear = v; _loadingStats = true; }); _loadStats(); },
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: 16),
+
+                if (_loadingStats)
+                  const SizedBox(height: 200, child: Center(child: CircularProgressIndicator()))
+                else ...[
+                  // Year total + All-time total
+                  Row(children: [
+                    Expanded(child: _StatBox(
+                      label: '${_selectedYear} Total Sales',
+                      value: '${settings.currencySymbol} ${_yearTotal.toStringAsFixed(0)}',
+                      icon: Icons.show_chart_rounded, color: const Color(0xFF1A56DB),
+                    )),
+                    const SizedBox(width: 12),
+                    Expanded(child: _StatBox(
+                      label: 'All-Time Total Sales',
+                      value: '${settings.currencySymbol} ${_allTimeTotal.toStringAsFixed(0)}',
+                      icon: Icons.account_balance_wallet_rounded, color: const Color(0xFF16A34A),
+                    )),
+                  ]),
+                  const SizedBox(height: 20),
+
+                  // Monthly bar chart
+                  SizedBox(
+                    height: 200,
+                    child: BarChart(BarChartData(
+                      alignment: BarChartAlignment.spaceAround,
+                      maxY: _monthlySales().reduce((a, b) => a > b ? a : b) * 1.2,
+                      barTouchData: BarTouchData(
+                        touchTooltipData: BarTouchTooltipData(
+                          getTooltipItem: (group, groupIdx, rod, rodIdx) {
+                            return BarTooltipItem(
+                              '${settings.currencySymbol} ${rod.toY.toStringAsFixed(0)}',
+                              TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600),
+                            );
+                          },
+                        ),
+                      ),
+                      titlesData: FlTitlesData(
+                        show: true,
+                        bottomTitles: AxisTitles(sideTitles: SideTitles(
+                          showTitles: true, reservedSize: 28,
+                          getTitlesWidget: (value, _) {
+                            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(months[value.toInt()], style: TextStyle(fontSize: 10, color: context.cs.onSurfaceVariant)),
+                            );
+                          },
+                        )),
+                        leftTitles: AxisTitles(sideTitles: SideTitles(
+                          showTitles: true, reservedSize: 50,
+                          getTitlesWidget: (value, _) {
+                            if (value >= 1000) return Text('${(value / 1000).toStringAsFixed(0)}k', style: TextStyle(fontSize: 10, color: context.cs.onSurfaceVariant));
+                            return Text('${value.toInt()}', style: TextStyle(fontSize: 10, color: context.cs.onSurfaceVariant));
+                          },
+                        )),
+                        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      ),
+                      borderData: FlBorderData(show: false),
+                      gridData: FlGridData(
+                        show: true, drawVerticalLine: false,
+                        getDrawingHorizontalLine: (v) => FlLine(color: context.cs.onSurfaceVariant.withAlpha(30), strokeWidth: 0.5),
+                      ),
+                      barGroups: List.generate(12, (i) {
+                        final sales = _monthlySales()[i];
+                        return BarChartGroupData(x: i, barRods: [
+                          BarChartRodData(
+                            toY: sales,
+                            color: i == DateTime.now().month - 1
+                                ? context.cs.primary
+                                : context.cs.primary.withAlpha(140),
+                            width: 16, borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+                          ),
+                        ]);
+                      }),
+                    )),
+                  ),
+                ],
+              ]),
+            ),
+
             const SizedBox(height: 16),
-
-            // ── Active Orders ─────────────────────────
             _ActiveOrdersList(orders: orders),
           ])),
         ),
       ]),
     ));
+  }
+}
+
+class _StatBox extends StatelessWidget {
+  const _StatBox({required this.label, required this.value, required this.icon, required this.color});
+  final String label, value;
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = context.isDark;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withAlpha(isDark ? 20 : 10),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withAlpha(50), width: 0.5),
+      ),
+      child: Row(children: [
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(color: color.withAlpha(25), borderRadius: BorderRadius.circular(10)),
+          child: Icon(icon, color: color, size: 24),
+        ),
+        const SizedBox(width: 14),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant, fontWeight: FontWeight.w500)),
+          const SizedBox(height: 4),
+          Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: color)),
+        ])),
+      ]),
+    );
   }
 }
 

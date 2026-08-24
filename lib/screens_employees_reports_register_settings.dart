@@ -769,14 +769,12 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => context.go('/dashboard')),
         title: const Text('Reports & Analytics'),
         actions: [
-          // Date range picker
           OutlinedButton.icon(
             icon: const Icon(Icons.date_range_rounded, size: 16),
             label: Text('${DateFormat('dd MMM').format(_range.start)} — ${DateFormat('dd MMM').format(_range.end)}'),
             onPressed: _pickDateRange,
           ),
           const SizedBox(width: 8),
-          // Quick presets
           PopupMenuButton<String>(
             initialValue: 'today',
             onSelected: (v) => setState(() {
@@ -806,10 +804,11 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
         ],
         bottom: TabBar(
           controller: _tab,
-          tabs: const [Tab(text: 'Sales Summary'), Tab(text: 'Z Report')],
+          tabs: const [Tab(text: 'X Report'), Tab(text: 'Sales Summary'), Tab(text: 'Z Report')],
         ),
       ),
       body: TabBarView(controller: _tab, children: [
+        _XReportHistoryTab(),
         _SalesSummaryTab(range: _range),
         _ZReportTab(),
       ]),
@@ -827,6 +826,215 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
   }
 }
 
+class _XReportHistoryTab extends ConsumerStatefulWidget {
+  @override ConsumerState<_XReportHistoryTab> createState() => _XReportHistoryTabState();
+}
+
+class _XReportHistoryTabState extends ConsumerState<_XReportHistoryTab> {
+  DateTime _selectedDay = DateTime.now();
+  List<CashRegisterRow> _shifts = [];
+  bool _loading = true;
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final db = ref.read(dbProvider);
+    final dayStart = DateTime(_selectedDay.year, _selectedDay.month, _selectedDay.day);
+    final dayEnd = dayStart.add(const Duration(days: 1));
+    final regs = await db.registerDao.historyForPeriod(dayStart, dayEnd);
+    if (mounted) setState(() { _shifts = regs; _loading = false; });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sym = ref.watch(settingsProvider).currencySymbol;
+    final dayStart = DateTime(_selectedDay.year, _selectedDay.month, _selectedDay.day);
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Text('X Report History', style: context.tt.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+          const Spacer(),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.calendar_today, size: 16),
+            label: Text(DateFormat('dd MMM yyyy').format(_selectedDay)),
+            onPressed: () async {
+              final picked = await showDatePicker(context: context, initialDate: _selectedDay, firstDate: DateTime(2020), lastDate: DateTime.now());
+              if (picked != null) { setState(() => _selectedDay = picked); _load(); }
+            },
+          ),
+        ]),
+        const SizedBox(height: 16),
+
+        // Shift list for this day
+        if (_loading)
+          const Center(child: CircularProgressIndicator())
+        else if (_shifts.isEmpty)
+          Center(child: Padding(
+            padding: const EdgeInsets.all(40),
+            child: Column(children: [
+              Icon(Icons.receipt_long, size: 48, color: context.cs.onSurfaceVariant.withAlpha(80)),
+              const SizedBox(height: 12),
+              Text('No shifts found for ${DateFormat('dd MMM yyyy').format(_selectedDay)}', style: TextStyle(color: context.cs.onSurfaceVariant)),
+            ]),
+          ))
+        else
+          ..._shifts.asMap().entries.map((entry) {
+            final idx = entry.key;
+            final reg = entry.value;
+            final totalSales = reg.totalCashSales + reg.totalCardSales + reg.totalWalletSales + reg.totalCreditSales;
+            final isOpen = reg.status == 'open';
+            final profit = totalSales - reg.totalExpenses;
+            return AppCard(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Row(children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: isOpen ? Colors.orange.withAlpha(20) : Colors.green.withAlpha(20),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text('Shift ${idx + 1}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: isOpen ? Colors.orange : Colors.green)),
+                  ),
+                  const SizedBox(width: 10),
+                  Text('${DateFormat('h:mm a').format(reg.openedAt)} — ${reg.closedAt != null ? DateFormat('h:mm a').format(reg.closedAt!) : 'Open'}',
+                    style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant)),
+                  const Spacer(),
+                  if (reg.closedBy != null)
+                    Text('Closed by ${reg.closedBy}', style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+                ]),
+                const SizedBox(height: 12),
+                Row(children: [
+                  _ShiftStat('Sales', '$sym ${totalSales.toStringAsFixed(0)}', AppColors.orderOpen),
+                  _ShiftStat('Orders', '${reg.totalOrders}', AppColors.orderKitchen),
+                  _ShiftStat('Expenses', '$sym ${reg.totalExpenses.toStringAsFixed(0)}', AppColors.error),
+                  _ShiftStat('Profit', '$sym ${profit.toStringAsFixed(0)}', profit >= 0 ? Colors.green : Colors.red),
+                  _ShiftStat('Voids', '${reg.totalVoids}', context.cs.onSurfaceVariant),
+                ]),
+                const SizedBox(height: 12),
+                // Expandable X Report
+                Row(children: [
+                  Expanded(child: OutlinedButton.icon(
+                    icon: const Icon(Icons.visibility, size: 14),
+                    label: const Text('View Full X Report', style: TextStyle(fontSize: 12)),
+                    onPressed: () => _showFullXReport(reg, sym),
+                  )),
+                  const SizedBox(width: 8),
+                  Expanded(child: OutlinedButton.icon(
+                    icon: const Icon(Icons.print_rounded, size: 14),
+                    label: const Text('Print X Report', style: TextStyle(fontSize: 12)),
+                    onPressed: () async {
+                      await PrintService.instance.printXReport(CashRegisterEntity(
+                        id: reg.id, openedBy: reg.openedBy, openingCash: reg.openingCash,
+                        openedAt: reg.openedAt, status: isOpen ? RegisterStatus.open : RegisterStatus.closed,
+                        closedAt: reg.closedAt, closedBy: reg.closedBy, closingCash: reg.closingCash,
+                        totalCashSales: reg.totalCashSales, totalCardSales: reg.totalCardSales,
+                        totalWalletSales: reg.totalWalletSales, totalCreditSales: reg.totalCreditSales,
+                        totalExpenses: reg.totalExpenses, cashIn: reg.cashIn, cashOut: reg.cashOut,
+                        totalOrders: reg.totalOrders, totalKitchenTickets: reg.totalKitchenTickets,
+                        totalDiscounts: reg.totalDiscounts, totalTax: reg.totalTax, totalVoids: reg.totalVoids,
+                      ));
+                    },
+                  )),
+                ]),
+              ]),
+            );
+          }),
+      ]),
+    );
+  }
+
+  Future<void> _showFullXReport(CashRegisterRow reg, String sym) async {
+    final data = await PrintService.instance.collectShiftData(reg.openedAt);
+    final totalSales = reg.totalCashSales + reg.totalCardSales + reg.totalWalletSales + reg.totalCreditSales;
+    final profit = totalSales - reg.totalExpenses;
+    final expenses = await ref.read(dbProvider).registerDao.expensesForRegister(reg.id);
+    if (!mounted) return;
+    showDialog(context: context, builder: (_) => AlertDialog(
+      title: Row(children: [
+        const Icon(Icons.receipt_long, size: 20),
+        const SizedBox(width: 8),
+        Text('X Report — ${DateFormat("dd MMM yyyy h:mm a").format(reg.openedAt)}'),
+      ]),
+      content: SizedBox(width: 450, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _XSection('SALES SUMMARY', [
+          ('Total sales', '$sym ${totalSales.toStringAsFixed(0)}'),
+          ('Cash sales', '$sym ${reg.totalCashSales.toStringAsFixed(0)}'),
+          ('Card sales', '$sym ${reg.totalCardSales.toStringAsFixed(0)}'),
+          ('Wallet sales', '$sym ${reg.totalWalletSales.toStringAsFixed(0)}'),
+          ('Credit sales', '$sym ${reg.totalCreditSales.toStringAsFixed(0)}'),
+          ('Discounts', '$sym ${reg.totalDiscounts.toStringAsFixed(0)}'),
+          ('Tax collected', '$sym ${reg.totalTax.toStringAsFixed(0)}'),
+          ('Orders', '${reg.totalOrders}'),
+        ]),
+        const SizedBox(height: 12),
+        _XSection('ITEMS SOLD', data.itemSales.isEmpty
+          ? [('No items sold', '')]
+          : data.itemSales.map((s) => ('${s.qty}x ${s.name}', '$sym ${s.amount.toStringAsFixed(0)}')).toList(),
+        ),
+        const SizedBox(height: 12),
+        _XSection('KITCHEN', [
+          ('Tickets printed', '${data.kitchenGenerated}'),
+          ('Items sent', '${data.kitchenItemsSent}'),
+          ('Void tickets', '${data.voidedKitchen}'),
+        ]),
+        if (data.cancelledItems.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _XSection('CANCELLED ITEMS', data.cancelledItems.map((c) => (
+            '${c.quantity}x ${c.itemName}', 'Order #${c.orderNumber}  Ticket #${c.ticketNumber}',
+          )).toList()),
+        ],
+        const SizedBox(height: 12),
+        _XSection('EXPENSES', expenses.isEmpty
+          ? [('No expenses', '')]
+          : expenses.map((e) => ('${e.category}: ${e.description}', '$sym ${e.amount.toStringAsFixed(0)}')).toList(),
+        ),
+        const SizedBox(height: 12),
+        _XSection('PROFIT', [
+          ('Total sales', '$sym ${totalSales.toStringAsFixed(0)}'),
+          ('Total expenses', '$sym ${reg.totalExpenses.toStringAsFixed(0)}'),
+          ('Net profit', '$sym ${profit.toStringAsFixed(0)}'),
+        ]),
+      ]))),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        FilledButton.icon(
+          icon: const Icon(Icons.print_rounded, size: 16),
+          label: const Text('Print'),
+          onPressed: () async {
+            Navigator.pop(context);
+            await PrintService.instance.printXReport(CashRegisterEntity(
+              id: reg.id, openedBy: reg.openedBy, openingCash: reg.openingCash,
+              openedAt: reg.openedAt, status: RegisterStatus.closed,
+              closedAt: reg.closedAt, closedBy: reg.closedBy, closingCash: reg.closingCash,
+              totalCashSales: reg.totalCashSales, totalCardSales: reg.totalCardSales,
+              totalWalletSales: reg.totalWalletSales, totalCreditSales: reg.totalCreditSales,
+              totalExpenses: reg.totalExpenses, cashIn: reg.cashIn, cashOut: reg.cashOut,
+              totalOrders: reg.totalOrders, totalKitchenTickets: reg.totalKitchenTickets,
+              totalDiscounts: reg.totalDiscounts, totalTax: reg.totalTax, totalVoids: reg.totalVoids,
+            ));
+          },
+        ),
+      ],
+    ));
+  }
+}
+
+class _ShiftStat extends StatelessWidget {
+  const _ShiftStat(this.label, this.value, this.color);
+  final String label, value;
+  final Color color;
+  @override
+  Widget build(BuildContext context) => Expanded(child: Column(children: [
+    Text(value, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: color)),
+    const SizedBox(height: 2),
+    Text(label, style: TextStyle(fontSize: 10, color: context.cs.onSurfaceVariant)),
+  ]));
+}
+
 class _SalesSummaryTab extends ConsumerWidget {
   const _SalesSummaryTab({required this.range});
   final DateTimeRange range;
@@ -834,11 +1042,17 @@ class _SalesSummaryTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final sym = ref.watch(settingsProvider).currencySymbol;
-    return FutureBuilder<List<InvoiceRow>>(
-      future: ref.watch(dbProvider).invoiceDao.forPeriod(range.start, range.end),
+    final db = ref.watch(dbProvider);
+    return FutureBuilder<(List<InvoiceRow>, List<ExpenseRow>)>(
+      future: () async {
+        final inv = await db.invoiceDao.forPeriod(range.start, range.end);
+        final exp = await db.registerDao.expensesForPeriod(range.start, range.end);
+        return (inv, exp);
+      }(),
       builder: (_, snap) {
         if (!snap.hasData) return const Center(child: CircularProgressIndicator());
-        final invoices = snap.data!;
+        final invoices = snap.data!.$1;
+        final expenses = snap.data!.$2;
         final totalSales    = invoices.fold(0.0, (s, i) => s + i.grandTotal);
         final totalDiscount = invoices.fold(0.0, (s, i) => s + i.discountValue);
         final totalTax      = invoices.fold(0.0, (s, i) => s + i.taxValue);
@@ -846,13 +1060,14 @@ class _SalesSummaryTab extends ConsumerWidget {
         final totalCard     = invoices.where((i) => i.paymentMethod == 'card').fold(0.0, (s, i) => s + i.grandTotal);
         final totalWallet   = invoices.where((i) => i.paymentMethod == 'wallet').fold(0.0, (s, i) => s + i.grandTotal);
         final totalCredit   = invoices.where((i) => i.paymentMethod == 'credit').fold(0.0, (s, i) => s + i.grandTotal);
+        final totalExpenses = expenses.fold(0.0, (s, e) => s + e.amount);
+        final profit = totalSales - totalExpenses;
         final count = invoices.length;
         final avg = count > 0 ? totalSales / count : 0.0;
 
         return SingleChildScrollView(
           padding: const EdgeInsets.all(20),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            // KPI grid
             GridView.count(
               shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
               crossAxisCount: 4, childAspectRatio: 2.2,
@@ -861,15 +1076,26 @@ class _SalesSummaryTab extends ConsumerWidget {
                 _ReportKPI('Total sales', '$sym ${totalSales.toStringAsFixed(0)}', Icons.trending_up, AppColors.orderOpen),
                 _ReportKPI('Total orders', '$count', Icons.receipt_long, AppColors.orderKitchen),
                 _ReportKPI('Avg. order', '$sym ${avg.toStringAsFixed(0)}', Icons.equalizer, AppColors.orderReady),
+                _ReportKPI('Total expenses', '$sym ${totalExpenses.toStringAsFixed(0)}', Icons.receipt, AppColors.error),
+                _ReportKPI('Profit / Loss', '$sym ${profit.toStringAsFixed(0)}', profit >= 0 ? Icons.trending_up : Icons.trending_down, profit >= 0 ? Colors.green : Colors.red),
                 _ReportKPI('Tax collected', '$sym ${totalTax.toStringAsFixed(0)}', Icons.percent, const Color(0xFF7C3AED)),
+                _ReportKPI('Discounts', '$sym ${totalDiscount.toStringAsFixed(0)}', Icons.discount, const Color(0xFFD97706)),
                 _ReportKPI('Cash', '$sym ${totalCash.toStringAsFixed(0)}', Icons.payments, AppColors.orderOpen),
+              ],
+            ),
+            const SizedBox(height: 12),
+            GridView.count(
+              shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+              crossAxisCount: 4, childAspectRatio: 2.2,
+              crossAxisSpacing: 12, mainAxisSpacing: 12,
+              children: [
                 _ReportKPI('Card', '$sym ${totalCard.toStringAsFixed(0)}', Icons.credit_card, AppColors.orderKitchen),
                 _ReportKPI('Wallet', '$sym ${totalWallet.toStringAsFixed(0)}', Icons.account_balance_wallet, const Color(0xFF0EA5E9)),
                 _ReportKPI('Credit', '$sym ${totalCredit.toStringAsFixed(0)}', Icons.person, const Color(0xFFDB2777)),
+                _ReportKPI('Expense items', '${expenses.length}', Icons.receipt_long, const Color(0xFFD97706)),
               ],
             ),
             const SizedBox(height: 20),
-            // Payment breakdown chart
             if (totalSales > 0) AppCard(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('Payment breakdown', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
@@ -984,11 +1210,11 @@ class _SalesSummaryTab extends ConsumerWidget {
       } catch (_) {}
       return OrderItemEntity(
         id: i.id, orderId: i.orderId,
-        menuItem: MenuItemEntity(id: i.menuItemId, groupId: 0, groupName: '', name: i.menuItemName, price: i.unitPrice),
-        quantity: i.quantity, unitPrice: i.unitPrice, notes: i.notes,
+        menuItem: MenuItemEntity(id: i.menuItemId ?? 0, groupId: 0, groupName: '', name: i.menuItemName, price: i.unitPrice, costPrice: i.costPrice),
+        quantity: i.quantity, unitPrice: i.unitPrice, costPrice: i.costPrice, notes: i.notes,
         status: OrderItemStatus.values.firstWhere((s) => s.name == i.status, orElse: () => OrderItemStatus.pending),
         modifiers: mods, isVoided: i.isVoided, sentToKitchenAt: i.sentToKitchenAt,
-        dealId: i.dealId, dealItemsJson: i.dealItemsJson,
+        dealId: i.dealId, dealItemsJson: i.dealItemsJson, isCustomItem: i.isCustomItem,
       );
     }).toList();
     List<PaymentSplit> splits = [];

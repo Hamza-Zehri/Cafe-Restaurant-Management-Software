@@ -914,6 +914,7 @@ class _POSScreenState extends ConsumerState<POSScreen> {
             onKitchen: order != null && order.pendingKitchenItems.isNotEmpty ? _sendToKitchen : null,
             onBill: order != null && order.activeItems.isNotEmpty ? _printBill : null,
             onPay: order != null && order.activeItems.isNotEmpty ? _showPaymentDialog : null,
+            onAddCustomItem: _showAddCustomItemDialog,
           ),
         ),
       ]),
@@ -1177,6 +1178,53 @@ class _POSScreenState extends ConsumerState<POSScreen> {
         ),
       ],
     )));
+  }
+
+  void _showAddCustomItemDialog() {
+    final nameCtrl = TextEditingController();
+    final priceCtrl = TextEditingController();
+    final costCtrl = TextEditingController();
+    final qtyCtrl = TextEditingController(text: '1');
+    final notesCtrl = TextEditingController();
+    showDialog(context: context, builder: (_) => AlertDialog(
+      title: const Text('Add Custom Item'),
+      content: SizedBox(width: 380, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(controller: nameCtrl, autofocus: true,
+          decoration: const InputDecoration(labelText: 'Item Name *')),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(child: TextField(controller: priceCtrl, keyboardType: TextInputType.number,
+            decoration: const InputDecoration(labelText: 'Sale Price *'))),
+          const SizedBox(width: 10),
+          Expanded(child: TextField(controller: costCtrl, keyboardType: TextInputType.number,
+            decoration: const InputDecoration(labelText: 'Cost Price'))),
+        ]),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(child: TextField(controller: qtyCtrl, keyboardType: TextInputType.number,
+            decoration: const InputDecoration(labelText: 'Quantity'))),
+          const SizedBox(width: 10),
+          Expanded(child: TextField(controller: notesCtrl,
+            decoration: const InputDecoration(labelText: 'Notes'))),
+        ]),
+      ]))),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () {
+            final name = nameCtrl.text.trim();
+            final price = double.tryParse(priceCtrl.text) ?? 0;
+            final cost = double.tryParse(costCtrl.text) ?? 0;
+            final qty = int.tryParse(qtyCtrl.text) ?? 1;
+            if (name.isEmpty) { showError(context, 'Name is required'); return; }
+            if (price <= 0) { showError(context, 'Sale price must be > 0'); return; }
+            ref.read(posProvider(widget.tableId).notifier).addCustomItem(name, price, cost, qty: qty, notes: notesCtrl.text);
+            Navigator.pop(context);
+          },
+          child: const Text('Add Item'),
+        ),
+      ],
+    ));
   }
 
   void _showPaymentDialog() {
@@ -1648,7 +1696,7 @@ class _CartPanel extends ConsumerWidget {
   const _CartPanel({
     required this.order, required this.tableId,
     required this.onQtyChange, required this.onVoidItem, required this.onPrintItem,
-    required this.onDiscount, this.onKitchen, this.onBill, this.onPay,
+    required this.onDiscount, this.onKitchen, this.onBill, this.onPay, this.onAddCustomItem,
   });
   final OrderEntity? order;
   final int tableId;
@@ -1659,6 +1707,7 @@ class _CartPanel extends ConsumerWidget {
   final VoidCallback? onKitchen;
   final VoidCallback? onBill;
   final VoidCallback? onPay;
+  final VoidCallback? onAddCustomItem;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1738,6 +1787,22 @@ class _CartPanel extends ConsumerWidget {
                   style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20, color: context.cs.primary)),
               ]),
               const SizedBox(height: 12),
+              // Add Custom Item button
+              if (onAddCustomItem != null)
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.add_rounded, size: 16),
+                    label: const Text('Add Custom Item'),
+                    onPressed: onAddCustomItem,
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      side: BorderSide(color: context.cs.primary.withAlpha(100)),
+                      foregroundColor: context.cs.primary,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 8),
               // Action buttons
               Row(children: [
                 Expanded(child: OutlinedButton.icon(
@@ -1815,6 +1880,17 @@ class _CartItemRow extends StatelessWidget {
                 borderRadius: BorderRadius.circular(4),
               ),
               child: const Text('DEAL', style: TextStyle(fontSize: 9, color: Color(0xFFD97706), fontWeight: FontWeight.w800)),
+            ),
+            const SizedBox(width: 6),
+          ],
+          if (item.isCustomItem) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: const Color(0xFF7C3AED).withAlpha(20),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Text('CUSTOM', style: TextStyle(fontSize: 9, color: Color(0xFF7C3AED), fontWeight: FontWeight.w800)),
             ),
             const SizedBox(width: 6),
           ],

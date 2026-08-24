@@ -142,9 +142,10 @@ class Orders extends Table {
 class OrderItems extends Table {
   IntColumn get id => integer().autoIncrement()();
   IntColumn get orderId => integer().references(Orders, #id, onDelete: KeyAction.cascade)();
-  IntColumn get menuItemId => integer().references(MenuItems, #id)();
+  IntColumn get menuItemId => integer().nullable().references(MenuItems, #id)();
   TextColumn get menuItemName => text()();
   RealColumn get unitPrice => real()();
+  RealColumn get costPrice => real().withDefault(const Constant(0.0))();
   IntColumn get quantity => integer()();
   TextColumn get notes => text().withDefault(const Constant(''))();
   TextColumn get status => text().withDefault(const Constant('pending'))();
@@ -153,6 +154,7 @@ class OrderItems extends Table {
   DateTimeColumn get sentToKitchenAt => dateTime().nullable()();
   IntColumn get dealId => integer().nullable().references(Deals, #id)();
   TextColumn get dealItemsJson => text().nullable()();
+  BoolColumn get isCustomItem => boolean().withDefault(const Constant(false))();
 }
 
 class Invoices extends Table {
@@ -673,7 +675,7 @@ class SettingsDao extends DatabaseAccessor<AppDatabase> with _$SettingsDaoMixin 
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _open());
 
-  @override int get schemaVersion => 6;
+  @override int get schemaVersion => 7;
 
   @override MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) async {
@@ -703,6 +705,37 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 6) {
         await m.createTable(cashTransactions);
+      }
+      if (from < 7) {
+        await m.addColumn(orderItems, orderItems.costPrice);
+        await m.addColumn(orderItems, orderItems.isCustomItem);
+        await customStatement(
+          'CREATE TABLE order_items_new ('
+          'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+          'order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,'
+          'menu_item_id INTEGER REFERENCES menu_items(id),'
+          'menu_item_name TEXT NOT NULL,'
+          'unit_price REAL NOT NULL,'
+          'cost_price REAL NOT NULL DEFAULT 0.0,'
+          'quantity INTEGER NOT NULL,'
+          'notes TEXT NOT NULL DEFAULT \'\','
+          'status TEXT NOT NULL DEFAULT \'pending\','
+          'modifiers_json TEXT NOT NULL DEFAULT \'[]\','
+          'is_voided INTEGER NOT NULL DEFAULT 0,'
+          'sent_to_kitchen_at INTEGER,'
+          'deal_id INTEGER REFERENCES deals(id),'
+          'deal_items_json TEXT,'
+          'is_custom_item INTEGER NOT NULL DEFAULT 0'
+          ')',
+        );
+        await customStatement(
+          'INSERT INTO order_items_new '
+          '(id, order_id, menu_item_id, menu_item_name, unit_price, cost_price, quantity, notes, status, modifiers_json, is_voided, sent_to_kitchen_at, deal_id, deal_items_json, is_custom_item) '
+          'SELECT id, order_id, menu_item_id, menu_item_name, unit_price, 0.0, quantity, notes, status, modifiers_json, is_voided, sent_to_kitchen_at, deal_id, deal_items_json, 0 '
+          'FROM order_items',
+        );
+        await customStatement('DROP TABLE order_items');
+        await customStatement('ALTER TABLE order_items_new RENAME TO order_items');
       }
     },
     beforeOpen: (m) async {
