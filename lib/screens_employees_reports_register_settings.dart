@@ -760,7 +760,12 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
   );
 
   @override
-  void initState() { super.initState(); _tab = TabController(length: 3, vsync: this); _tab.index = widget.initialTab; }
+  void initState() {
+    super.initState();
+    _tab = TabController(length: 3, vsync: this);
+    _tab.index = widget.initialTab;
+    _tab.addListener(() { if (mounted) setState(() {}); });
+  }
   @override void dispose() { _tab.dispose(); super.dispose(); }
 
   @override
