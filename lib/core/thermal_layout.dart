@@ -57,7 +57,7 @@ class ThermalLayout {
     leftMargin = leftMm * PdfPageFormat.mm;
     rightMargin = rightMm * PdfPageFormat.mm;
     contentWidth = paperWidth - leftMargin - rightMargin;
-    _pageFormat = PdfPageFormat(paperWidth, double.infinity,
+    _pageFormat = PdfPageFormat(paperWidth, 2000 * PdfPageFormat.mm,
         marginLeft: leftMargin, marginRight: rightMargin,
         marginTop: leftMargin, marginBottom: leftMargin);
   }
@@ -71,7 +71,7 @@ class ThermalLayout {
     contentWidth = paperWidth - leftMargin - rightMargin;
     _pageFormat = PdfPageFormat(
       paperWidth,
-      double.infinity,
+      2000 * PdfPageFormat.mm,
       marginLeft: leftMargin,
       marginTop: format.marginTop,
       marginRight: rightMargin,
