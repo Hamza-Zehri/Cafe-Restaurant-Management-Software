@@ -90,7 +90,7 @@ If you have questions about this privacy policy, please contact:
 
 **Hamza Zehri**  
 GitHub: https://github.com/Hamza-Zehri  
-Email: [Your Email Address]
+Email: Hamidzehri42@gmail.com
 
 ---
 
