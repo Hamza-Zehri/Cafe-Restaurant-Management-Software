@@ -849,9 +849,7 @@ class _XReportHistoryTabState extends ConsumerState<_XReportHistoryTab> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final db = ref.read(dbProvider);
-    final dayStart = DateTime(_selectedDay.year, _selectedDay.month, _selectedDay.day);
-    final dayEnd = dayStart.add(const Duration(days: 1));
-    final regs = await db.registerDao.historyForPeriod(dayStart, dayEnd);
+    final regs = await db.registerDao.historyForBusinessDay(_selectedDay);
     if (mounted) setState(() { _shifts = regs; _loading = false; });
   }
 
@@ -956,7 +954,7 @@ class _XReportHistoryTabState extends ConsumerState<_XReportHistoryTab> {
   }
 
   Future<void> _showFullXReport(CashRegisterRow reg, String sym) async {
-    final data = await PrintService.instance.collectShiftData(reg.openedAt);
+    final data = await PrintService.instance.collectShiftDataForShift(reg.id);
     final totalSales = reg.totalCashSales + reg.totalCardSales + reg.totalWalletSales + reg.totalCreditSales;
     final profit = totalSales - reg.totalExpenses;
     final expenses = await ref.read(dbProvider).registerDao.expensesForRegister(reg.id);
@@ -965,7 +963,7 @@ class _XReportHistoryTabState extends ConsumerState<_XReportHistoryTab> {
       title: Row(children: [
         const Icon(Icons.receipt_long, size: 20),
         const SizedBox(width: 8),
-        Text('X Report — ${DateFormat("dd MMM yyyy h:mm a").format(reg.openedAt)}'),
+        Text('X Report — Shift #${reg.id} · ${DateFormat("dd MMM yyyy h:mm a").format(reg.openedAt)}'),
       ]),
       content: SizedBox(width: 450, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         _XSection('ITEMS SOLD', data.itemSales.isEmpty
@@ -1032,321 +1030,453 @@ class _ShiftStat extends StatelessWidget {
   ]));
 }
 
-class _SalesSummaryTab extends ConsumerWidget {
+class _SalesSummaryTab extends ConsumerStatefulWidget {
   const _SalesSummaryTab({required this.range});
   final DateTimeRange range;
+
+  @override
+  ConsumerState<_SalesSummaryTab> createState() => _SalesSummaryTabState();
+}
+
+class _SalesSummaryTabState extends ConsumerState<_SalesSummaryTab> {
+  int? _selectedShiftId;
+
+  @override
+  Widget build(BuildContext context) {
+    final sym = ref.watch(settingsProvider).currencySymbol;
+    final db = ref.watch(dbProvider);
+    return FutureBuilder<(List<CashRegisterRow>, List<ExpenseRow>)>(
+      future: () async {
+        final regs = await db.registerDao.shiftsForPeriod(widget.range.start, widget.range.end);
+        final exp = await db.registerDao.expensesForPeriod(widget.range.start, widget.range.end);
+        return (regs, exp);
+      }(),
+      builder: (_, snap) {
+        if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+        final shifts = snap.data!.$1;
+        final expenses = snap.data!.$2;
+        final currentShift = shifts.where((r) => r.id == _selectedShiftId).firstOrNull;
+
+        return Column(children: [
+          _ShiftSelector(
+            shifts: shifts,
+            selectedId: _selectedShiftId,
+            sym: sym,
+            onSelect: (id) => setState(() => _selectedShiftId = id),
+            onClear: () => setState(() => _selectedShiftId = null),
+          ),
+          Expanded(child: currentShift != null
+            ? _ShiftSalesView(shift: currentShift, shiftId: currentShift.id, expenses: expenses)
+            : _PeriodSalesView(range: widget.range, expenses: expenses)),
+        ]);
+      },
+    );
+  }
+}
+
+// Selector strip listing the shifts opened for the chosen day/period
+class _ShiftSelector extends StatelessWidget {
+  const _ShiftSelector({required this.shifts, required this.selectedId, required this.sym, required this.onSelect, required this.onClear});
+  final List<CashRegisterRow> shifts;
+  final int? selectedId;
+  final String sym;
+  final ValueChanged<int?> onSelect;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.point_of_sale_rounded, size: 16, color: Colors.green),
+          const SizedBox(width: 6),
+          Text('Shifts opened for this day (${shifts.length})',
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+          const Spacer(),
+          TextButton(
+            onPressed: shifts.isEmpty ? null : () => onSelect(null),
+            child: const Text('All periods'),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        if (shifts.isEmpty)
+          Text('No shifts found for the selected business day.', style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant))
+        else
+          Wrap(spacing: 10, runSpacing: 10, children: [
+            ...shifts.map((r) {
+              final sales = r.totalCashSales + r.totalCardSales + r.totalWalletSales + r.totalCreditSales;
+              final selected = selectedId == r.id;
+              return InkWell(
+                onTap: () => onSelect(r.id),
+                borderRadius: BorderRadius.circular(10),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: selected ? Colors.green.withAlpha(25) : context.cardBg,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: selected ? Colors.green : context.border, width: selected ? 1.5 : 1),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.schedule_rounded, size: 14, color: selected ? Colors.green : context.cs.onSurfaceVariant),
+                    const SizedBox(width: 6),
+                    Text('Shift #${r.id}',
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13,
+                        color: selected ? Colors.green : null)),
+                    Text('  ${DateFormat('HH:mm').format(r.openedAt)}–${r.closedAt != null ? DateFormat('HH:mm').format(r.closedAt!) : 'open'}',
+                      style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant)),
+                    const SizedBox(width: 10),
+                    Text('$sym ${sales.toStringAsFixed(0)}',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: context.cs.primary)),
+                  ]),
+                ),
+              );
+            }),
+          ]),
+      ]),
+    );
+  }
+}
+
+// Summary + invoice list for a single selected shift
+class _ShiftSalesView extends ConsumerWidget {
+  const _ShiftSalesView({required this.shift, required this.shiftId, required this.expenses});
+  final CashRegisterRow shift;
+  final int shiftId;
+  final List<ExpenseRow> expenses;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final sym = ref.watch(settingsProvider).currencySymbol;
     final db = ref.watch(dbProvider);
-    return FutureBuilder<(List<InvoiceRow>, List<ExpenseRow>)>(
-      future: () async {
-        final inv = await db.invoiceDao.forPeriod(range.start, range.end);
-        final exp = await db.registerDao.expensesForPeriod(range.start, range.end);
-        return (inv, exp);
-      }(),
+    return FutureBuilder<List<InvoiceRow>>(
+      future: db.invoiceDao.byShift(shiftId),
       builder: (_, snap) {
         if (!snap.hasData) return const Center(child: CircularProgressIndicator());
-        final invoices = snap.data!.$1;
-        final expenses = snap.data!.$2;
-        final totalSales    = invoices.fold(0.0, (s, i) => s + i.grandTotal);
-        final totalDiscount = invoices.fold(0.0, (s, i) => s + i.discountValue);
-        final totalTax      = invoices.fold(0.0, (s, i) => s + i.taxValue);
-        final totalCash     = invoices.where((i) => i.paymentMethod == 'cash').fold(0.0, (s, i) => s + i.grandTotal);
-        final totalCard     = invoices.where((i) => i.paymentMethod == 'card').fold(0.0, (s, i) => s + i.grandTotal);
-        final totalWallet   = invoices.where((i) => i.paymentMethod == 'wallet').fold(0.0, (s, i) => s + i.grandTotal);
-        final totalCredit   = invoices.where((i) => i.paymentMethod == 'credit').fold(0.0, (s, i) => s + i.grandTotal);
-        final totalExpenses = expenses.fold(0.0, (s, e) => s + e.amount);
-        final profit = totalSales - totalExpenses;
-        final count = invoices.length;
-        final avg = count > 0 ? totalSales / count : 0.0;
-
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            GridView.count(
-              shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: 4, childAspectRatio: 2.2,
-              crossAxisSpacing: 12, mainAxisSpacing: 12,
-              children: [
-                _ReportKPI('Total sales', '$sym ${totalSales.toStringAsFixed(0)}', Icons.trending_up, AppColors.orderOpen),
-                _ReportKPI('Total orders', '$count', Icons.receipt_long, AppColors.orderKitchen),
-                _ReportKPI('Avg. order', '$sym ${avg.toStringAsFixed(0)}', Icons.equalizer, AppColors.orderReady),
-                _ReportKPI('Total expenses', '$sym ${totalExpenses.toStringAsFixed(0)}', Icons.receipt, AppColors.error),
-                _ReportKPI('Profit / Loss', '$sym ${profit.toStringAsFixed(0)}', profit >= 0 ? Icons.trending_up : Icons.trending_down, profit >= 0 ? Colors.green : Colors.red),
-                _ReportKPI('Tax collected', '$sym ${totalTax.toStringAsFixed(0)}', Icons.percent, const Color(0xFF7C3AED)),
-                _ReportKPI('Discounts', '$sym ${totalDiscount.toStringAsFixed(0)}', Icons.discount, const Color(0xFFD97706)),
-                _ReportKPI('Cash', '$sym ${totalCash.toStringAsFixed(0)}', Icons.payments, AppColors.orderOpen),
-              ],
-            ),
-            const SizedBox(height: 12),
-            GridView.count(
-              shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: 4, childAspectRatio: 2.2,
-              crossAxisSpacing: 12, mainAxisSpacing: 12,
-              children: [
-                _ReportKPI('Card', '$sym ${totalCard.toStringAsFixed(0)}', Icons.credit_card, AppColors.orderKitchen),
-                _ReportKPI('Wallet', '$sym ${totalWallet.toStringAsFixed(0)}', Icons.account_balance_wallet, const Color(0xFF0EA5E9)),
-                _ReportKPI('Credit', '$sym ${totalCredit.toStringAsFixed(0)}', Icons.person, const Color(0xFFDB2777)),
-                _ReportKPI('Expense items', '${expenses.length}', Icons.receipt_long, const Color(0xFFD97706)),
-              ],
-            ),
-            const SizedBox(height: 20),
-            if (totalSales > 0) AppCard(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Payment breakdown', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-                const SizedBox(height: 16),
-                SizedBox(height: 200, child: BarChart(BarChartData(
-                  alignment: BarChartAlignment.spaceAround,
-                  barGroups: [
-                    _bar(0, totalCash,   AppColors.orderOpen),
-                    _bar(1, totalCard,   AppColors.orderKitchen),
-                    _bar(2, totalWallet, const Color(0xFF0EA5E9)),
-                    _bar(3, totalCredit, const Color(0xFFDB2777)),
-                  ],
-                  titlesData: FlTitlesData(
-                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    leftTitles: AxisTitles(sideTitles: SideTitles(
-                      showTitles: true, reservedSize: 50,
-                      getTitlesWidget: (v, _) => Text(v >= 1000 ? '${(v/1000).toStringAsFixed(0)}k' : v.toStringAsFixed(0), style: const TextStyle(fontSize: 10)),
-                    )),
-                    bottomTitles: AxisTitles(sideTitles: SideTitles(
-                      showTitles: true, reservedSize: 22,
-                      getTitlesWidget: (v, _) {
-                        const labels = ['Cash', 'Card', 'Wallet', 'Credit'];
-                        return Text(labels[v.toInt()], style: const TextStyle(fontSize: 11));
-                      },
-                    )),
-                  ),
-                  gridData: FlGridData(show: true, drawVerticalLine: false),
-                  borderData: FlBorderData(show: false),
-                ))),
-              ]),
-            ),
-            const SizedBox(height: 16),
-            // Invoice list
-            Text('Invoices (${invoices.length})', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 10),
-            if (invoices.isEmpty)
-              Center(child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text('No invoices in this period', style: TextStyle(color: context.cs.onSurfaceVariant)),
-              ))
-            else
-              ...invoices.take(50).map((inv) => GestureDetector(
-                onTap: () => _showInvoiceDetail(ref, context, inv, sym),
-                child: Container(
-                  margin: const EdgeInsets.only(bottom: 6),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  decoration: BoxDecoration(color: context.cardBg, borderRadius: BorderRadius.circular(10), border: Border.all(color: context.border, width: 0.5)),
-                  child: Row(children: [
-                    Text(inv.invoiceNumber, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                    const SizedBox(width: 12),
-                    Text(inv.tableNameCol, style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 12)),
-                    const SizedBox(width: 8),
-                    Text(inv.waiterName, style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 12)),
-                    const Spacer(),
-                    Text(DateFormat('dd/MM h:mm a').format(inv.createdAt), style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
-                    const SizedBox(width: 14),
-                    Text('$sym ${inv.grandTotal.toStringAsFixed(0)}', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: context.cs.primary)),
-                    const SizedBox(width: 10),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                      decoration: BoxDecoration(color: Colors.green.withAlpha(20), borderRadius: BorderRadius.circular(5)),
-                      child: Text(inv.paymentMethod.toUpperCase(), style: const TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.w700)),
-                    ),
-                    const SizedBox(width: 8),
-                    SizedBox(width: 28, height: 28, child: IconButton(
-                      padding: EdgeInsets.zero, iconSize: 16,
-                      icon: const Icon(Icons.delete_outline, color: Colors.red),
-                      onPressed: () => _confirmDeleteInvoice(context, ref, inv),
-                    )),
-                    Icon(Icons.chevron_right, size: 18, color: context.cs.onSurfaceVariant),
-                  ]),
-                ),
-              )),
-          ]),
-        );
+        return _SalesSummaryBody(ref, context, snap.data!, expenses, shift, sym);
       },
     );
   }
+}
 
-  BarChartGroupData _bar(int x, double y, Color color) => BarChartGroupData(x: x, barRods: [
-    BarChartRodData(toY: y, color: color, width: 36, borderRadius: const BorderRadius.vertical(top: Radius.circular(5))),
-  ]);
+// Period (all shifts) summary + invoice list
+class _PeriodSalesView extends ConsumerWidget {
+  const _PeriodSalesView({required this.range, required this.expenses});
+  final DateTimeRange range;
+  final List<ExpenseRow> expenses;
 
-  void _confirmDeleteInvoice(BuildContext context, WidgetRef ref, InvoiceRow inv) {
-    final sym = ref.read(settingsProvider).currencySymbol;
-    showDialog(context: context, builder: (_) => AlertDialog(
-      title: const Text('Delete invoice?'),
-      content: Text('Delete ${inv.invoiceNumber} - $sym ${inv.grandTotal.toStringAsFixed(0)}?\n\nThis will reverse the register totals and cannot be undone.'),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-        FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: Colors.red),
-          onPressed: () async {
-            await ref.read(registerProvider.notifier).deleteInvoice(inv.id);
-            if (context.mounted) { Navigator.pop(context); showSuccess(context, 'Invoice deleted'); }
-          },
-          child: const Text('Delete'),
-        ),
-      ],
-    ));
-  }
-
-  Future<InvoiceEntity> _buildInvoiceEntity(WidgetRef ref, InvoiceRow inv) async {
-    final db = ref.read(dbProvider);
-    final itemRows = await db.orderDao.itemsForOrder(inv.orderId);
-    final items = itemRows.map((i) {
-      List<OrderModifier> mods = [];
-      try {
-        final decoded = jsonDecode(i.modifiersJson) as List;
-        mods = decoded.map((m) => OrderModifier(name: m['name'], price: (m['price'] as num).toDouble())).toList();
-      } catch (_) {}
-      return OrderItemEntity(
-        id: i.id, orderId: i.orderId,
-        menuItem: MenuItemEntity(id: i.menuItemId ?? 0, groupId: 0, groupName: '', name: i.menuItemName, price: i.unitPrice, costPrice: i.costPrice),
-        quantity: i.quantity, unitPrice: i.unitPrice, costPrice: i.costPrice, notes: i.notes,
-        status: OrderItemStatus.values.firstWhere((s) => s.name == i.status, orElse: () => OrderItemStatus.pending),
-        modifiers: mods, isVoided: i.isVoided, sentToKitchenAt: i.sentToKitchenAt,
-        dealId: i.dealId, dealItemsJson: i.dealItemsJson, isCustomItem: i.isCustomItem,
-      );
-    }).toList();
-    List<PaymentSplit> splits = [];
-    try {
-      final d = jsonDecode(inv.paymentSplitsJson) as List;
-      splits = d.map((s) => PaymentSplit(
-        method: PaymentMethod.values.firstWhere((m) => m.name == s['method'], orElse: () => PaymentMethod.cash),
-        amount: (s['amount'] as num).toDouble(),
-      )).toList();
-    } catch (_) {}
-    return InvoiceEntity(
-      id: inv.id, invoiceNumber: inv.invoiceNumber, orderId: inv.orderId,
-      orderNumber: inv.orderNumber, tableName: inv.tableNameCol, waiterName: inv.waiterName,
-      items: items, subtotal: inv.subtotal, discountValue: inv.discountValue,
-      taxValue: inv.taxValue, serviceChargeValue: inv.serviceChargeValue,
-      grandTotal: inv.grandTotal, amountPaid: inv.amountPaid, changeAmount: inv.changeAmount,
-      paymentMethod: PaymentMethod.values.firstWhere((m) => m.name == inv.paymentMethod, orElse: () => PaymentMethod.cash),
-      status: BillStatus.final_, createdAt: inv.createdAt, paymentSplits: splits,
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sym = ref.watch(settingsProvider).currencySymbol;
+    final db = ref.watch(dbProvider);
+    return FutureBuilder<List<InvoiceRow>>(
+      future: db.invoiceDao.forPeriod(range.start, range.end),
+      builder: (_, snap) {
+        if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+        return _SalesSummaryBody(ref, context, snap.data!, expenses, null, sym);
+      },
     );
   }
+}
 
-  void _showInvoiceDetail(WidgetRef ref, BuildContext ctx, InvoiceRow inv, String sym) {
-    showDialog(context: ctx, builder: (dialogCtx) {
-      final width = MediaQuery.of(dialogCtx).size.width * 0.42;
-      return Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: width.clamp(380, 560)),
-          child: FutureBuilder<InvoiceEntity>(
-            future: _buildInvoiceEntity(ref, inv),
-            builder: (_, snap) {
-              if (!snap.hasData) {
-                return const SizedBox(height: 200, child: Center(child: CircularProgressIndicator()));
-              }
-              final entity = snap.data!;
-              final sym_ = sym;
-              return Column(mainAxisSize: MainAxisSize.min, children: [
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: dialogCtx.cs.primary.withAlpha(15),
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-                  ),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Row(children: [
-                      Text(entity.invoiceNumber, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: dialogCtx.cs.primary)),
-                      const Spacer(),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(color: Colors.green.withAlpha(20), borderRadius: BorderRadius.circular(5)),
-                        child: Text(entity.paymentMethod.name.toUpperCase(), style: const TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.w700)),
-                      ),
-                    ]),
-                    const SizedBox(height: 4),
-                    Text('Table: ${entity.tableName}  |  Waiter: ${entity.waiterName}', style: TextStyle(fontSize: 12, color: dialogCtx.cs.onSurfaceVariant)),
-                    Text(DateFormat('dd MMM yyyy, h:mm a').format(entity.createdAt), style: TextStyle(fontSize: 11, color: dialogCtx.cs.onSurfaceVariant)),
-                  ]),
-                ),
-                Flexible(child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('ITEMS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: dialogCtx.cs.onSurfaceVariant, letterSpacing: 0.6)),
-                    const SizedBox(height: 6),
-                    ...entity.items.where((i) => !i.isVoided).map((item) => Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Row(children: [
-                        Text('${item.quantity}x', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(item.menuItem.name, style: const TextStyle(fontSize: 13))),
-                        Text('$sym_ ${item.lineTotal.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                      ]),
-                    )),
-                    if (entity.items.any((i) => i.isVoided)) ...[
-                      const SizedBox(height: 4),
-                      Text('Voided: ${entity.items.where((i) => i.isVoided).length} item(s)', style: TextStyle(fontSize: 11, color: Colors.red.shade400)),
-                    ],
-                  ]),
-                )),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(border: Border(top: BorderSide(color: dialogCtx.border, width: 0.5))),
-                  child: Column(children: [
-                    _detailRow('Subtotal', '$sym_ ${entity.subtotal.toStringAsFixed(0)}'),
-                    if (entity.discountValue > 0) _detailRow('Discount', '-$sym_ ${entity.discountValue.toStringAsFixed(0)}'),
-                    if (entity.taxValue > 0) _detailRow('Tax', '$sym_ ${entity.taxValue.toStringAsFixed(0)}'),
-                    if (entity.serviceChargeValue > 0) _detailRow('Service', '$sym_ ${entity.serviceChargeValue.toStringAsFixed(0)}'),
-                    Divider(color: dialogCtx.border),
-                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                      const Text('TOTAL', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-                      Text('$sym_ ${entity.grandTotal.toStringAsFixed(0)}', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: dialogCtx.cs.primary)),
-                    ]),
-                    const SizedBox(height: 4),
-                    _detailRow('Paid', '$sym_ ${entity.amountPaid.toStringAsFixed(0)}'),
-                    if (entity.changeAmount > 0) _detailRow('Change', '$sym_ ${entity.changeAmount.toStringAsFixed(0)}'),
-                    const SizedBox(height: 12),
-                    Row(children: [
-                      Expanded(child: OutlinedButton.icon(
-                        icon: const Icon(Icons.close, size: 16),
-                        label: const Text('Close'),
-                        onPressed: () => Navigator.pop(dialogCtx),
-                      )),
-                      const SizedBox(width: 10),
-                      Expanded(child: FilledButton.icon(
-                        icon: const Icon(Icons.print_rounded, size: 16),
-                        label: const Text('Print Receipt'),
-                        onPressed: () async {
-                          Navigator.pop(dialogCtx);
-                          try {
-                            await PrintService.instance.printFinalReceipt(entity);
-                          } catch (e) {
-                            showError(ctx, e is PrintException ? e.message : 'Print failed: $e');
-                          }
-                        },
-                      )),
-                    ]),
-                  ]),
-                ),
-              ]);
-            },
+// Shared: renders KPI grid, payment chart, and invoice list for the given invoices
+Widget _SalesSummaryBody(WidgetRef ref, BuildContext context, List<InvoiceRow> invoices,
+    List<ExpenseRow> expenses, CashRegisterRow? shift, String sym) {
+  final totalSales    = invoices.fold(0.0, (s, i) => s + i.grandTotal);
+  final totalDiscount = invoices.fold(0.0, (s, i) => s + i.discountValue);
+  final totalTax      = invoices.fold(0.0, (s, i) => s + i.taxValue);
+  final totalCash     = invoices.where((i) => i.paymentMethod == 'cash').fold(0.0, (s, i) => s + i.grandTotal);
+  final totalCard     = invoices.where((i) => i.paymentMethod == 'card').fold(0.0, (s, i) => s + i.grandTotal);
+  final totalWallet   = invoices.where((i) => i.paymentMethod == 'wallet').fold(0.0, (s, i) => s + i.grandTotal);
+  final totalCredit   = invoices.where((i) => i.paymentMethod == 'credit').fold(0.0, (s, i) => s + i.grandTotal);
+  final totalExpenses = expenses.where((e) => shift == null || (e.createdAt.isAfter(shift.openedAt) && (shift.closedAt == null || e.createdAt.isBefore(shift.closedAt!)))).fold(0.0, (s, e) => s + e.amount);
+  final profit = totalSales - totalExpenses;
+  final count = invoices.length;
+  final avg = count > 0 ? totalSales / count : 0.0;
+
+  return SingleChildScrollView(
+    padding: const EdgeInsets.all(20),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      GridView.count(
+        shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+        crossAxisCount: 4, childAspectRatio: 2.2,
+        crossAxisSpacing: 12, mainAxisSpacing: 12,
+        children: [
+          _ReportKPI('Total sales', '$sym ${totalSales.toStringAsFixed(0)}', Icons.trending_up, AppColors.orderOpen),
+          _ReportKPI('Total orders', '$count', Icons.receipt_long, AppColors.orderKitchen),
+          _ReportKPI('Avg. order', '$sym ${avg.toStringAsFixed(0)}', Icons.equalizer, AppColors.orderReady),
+          _ReportKPI('Total expenses', '$sym ${totalExpenses.toStringAsFixed(0)}', Icons.receipt, AppColors.error),
+          _ReportKPI('Profit / Loss', '$sym ${profit.toStringAsFixed(0)}', profit >= 0 ? Icons.trending_up : Icons.trending_down, profit >= 0 ? Colors.green : Colors.red),
+          _ReportKPI('Tax collected', '$sym ${totalTax.toStringAsFixed(0)}', Icons.percent, const Color(0xFF7C3AED)),
+          _ReportKPI('Discounts', '$sym ${totalDiscount.toStringAsFixed(0)}', Icons.discount, const Color(0xFFD97706)),
+          _ReportKPI('Cash', '$sym ${totalCash.toStringAsFixed(0)}', Icons.payments, AppColors.orderOpen),
+        ],
+      ),
+      const SizedBox(height: 12),
+      GridView.count(
+        shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+        crossAxisCount: 4, childAspectRatio: 2.2,
+        crossAxisSpacing: 12, mainAxisSpacing: 12,
+        children: [
+          _ReportKPI('Card', '$sym ${totalCard.toStringAsFixed(0)}', Icons.credit_card, AppColors.orderKitchen),
+          _ReportKPI('Wallet', '$sym ${totalWallet.toStringAsFixed(0)}', Icons.account_balance_wallet, const Color(0xFF0EA5E9)),
+          _ReportKPI('Credit', '$sym ${totalCredit.toStringAsFixed(0)}', Icons.person, const Color(0xFFDB2777)),
+          _ReportKPI('Expense items', '${totalExpenses > 0 ? expenses.where((e) => shift == null || (e.createdAt.isAfter(shift.openedAt) && (shift.closedAt == null || e.createdAt.isBefore(shift.closedAt!)))).length : 0}', Icons.receipt_long, const Color(0xFFD97706)),
+        ],
+      ),
+      const SizedBox(height: 20),
+      if (totalSales > 0) AppCard(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Payment breakdown', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 16),
+          SizedBox(height: 200, child: BarChart(BarChartData(
+            alignment: BarChartAlignment.spaceAround,
+            barGroups: [
+              _salesBar(0, totalCash,   AppColors.orderOpen),
+              _salesBar(1, totalCard,   AppColors.orderKitchen),
+              _salesBar(2, totalWallet, const Color(0xFF0EA5E9)),
+              _salesBar(3, totalCredit, const Color(0xFFDB2777)),
+            ],
+            titlesData: FlTitlesData(
+              topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              leftTitles: AxisTitles(sideTitles: SideTitles(
+                showTitles: true, reservedSize: 50,
+                getTitlesWidget: (v, _) => Text(v >= 1000 ? '${(v/1000).toStringAsFixed(0)}k' : v.toStringAsFixed(0), style: const TextStyle(fontSize: 10)),
+              )),
+              bottomTitles: AxisTitles(sideTitles: SideTitles(
+                showTitles: true, reservedSize: 22,
+                getTitlesWidget: (v, _) {
+                  const labels = ['Cash', 'Card', 'Wallet', 'Credit'];
+                  return Text(labels[v.toInt()], style: const TextStyle(fontSize: 11));
+                },
+              )),
+            ),
+            gridData: FlGridData(show: true, drawVerticalLine: false),
+            borderData: FlBorderData(show: false),
+          ))),
+        ]),
+      ),
+      const SizedBox(height: 16),
+      // Invoice list
+      Text('Invoices (${invoices.length})', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 10),
+      if (invoices.isEmpty)
+        Center(child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(shift != null ? 'No invoices for this shift' : 'No invoices in this period', style: TextStyle(color: context.cs.onSurfaceVariant)),
+        ))
+      else
+        ...invoices.take(50).map((inv) => GestureDetector(
+          onTap: () => _showInvoiceDetail(ref, context, inv, sym),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(color: context.cardBg, borderRadius: BorderRadius.circular(10), border: Border.all(color: context.border, width: 0.5)),
+            child: Row(children: [
+              Text(inv.invoiceNumber, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+              const SizedBox(width: 12),
+              Text(inv.tableNameCol, style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 12)),
+              const SizedBox(width: 8),
+              Text(inv.waiterName, style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 12)),
+              const Spacer(),
+              Text(DateFormat('dd/MM h:mm a').format(inv.createdAt), style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+              const SizedBox(width: 14),
+              Text('$sym ${inv.grandTotal.toStringAsFixed(0)}', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: context.cs.primary)),
+              const SizedBox(width: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(color: Colors.green.withAlpha(20), borderRadius: BorderRadius.circular(5)),
+                child: Text(inv.paymentMethod.toUpperCase(), style: const TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.w700)),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(width: 28, height: 28, child: IconButton(
+                padding: EdgeInsets.zero, iconSize: 16,
+                icon: const Icon(Icons.delete_outline, color: Colors.red),
+                onPressed: () => _confirmDeleteInvoice(context, ref, inv),
+              )),
+              Icon(Icons.chevron_right, size: 18, color: context.cs.onSurfaceVariant),
+            ]),
           ),
-        ),
-      );
-    });
-  }
-
-  Widget _detailRow(String label, String value) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 2),
-    child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-      Text(label, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-      Text(value, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+        )),
     ]),
   );
 }
+
+BarChartGroupData _salesBar(int x, double y, Color color) => BarChartGroupData(x: x, barRods: [
+    BarChartRodData(toY: y, color: color, width: 36, borderRadius: const BorderRadius.vertical(top: Radius.circular(5))),
+  ]);
+
+void _confirmDeleteInvoice(BuildContext context, WidgetRef ref, InvoiceRow inv) {
+  final sym = ref.read(settingsProvider).currencySymbol;
+  showDialog(context: context, builder: (_) => AlertDialog(
+    title: const Text('Delete invoice?'),
+    content: Text('Delete ${inv.invoiceNumber} - $sym ${inv.grandTotal.toStringAsFixed(0)}?\n\nThis will reverse the register totals and cannot be undone.'),
+    actions: [
+      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+      FilledButton(
+        style: FilledButton.styleFrom(backgroundColor: Colors.red),
+        onPressed: () async {
+          await ref.read(registerProvider.notifier).deleteInvoice(inv.id);
+          if (context.mounted) { Navigator.pop(context); showSuccess(context, 'Invoice deleted'); }
+        },
+        child: const Text('Delete'),
+      ),
+    ],
+  ));
+}
+
+Future<InvoiceEntity> _buildInvoiceEntity(WidgetRef ref, InvoiceRow inv) async {
+  final db = ref.read(dbProvider);
+  final itemRows = await db.orderDao.itemsForOrder(inv.orderId);
+  final items = itemRows.map((i) {
+    List<OrderModifier> mods = [];
+    try {
+      final decoded = jsonDecode(i.modifiersJson) as List;
+      mods = decoded.map((m) => OrderModifier(name: m['name'], price: (m['price'] as num).toDouble())).toList();
+    } catch (_) {}
+    return OrderItemEntity(
+      id: i.id, orderId: i.orderId,
+      menuItem: MenuItemEntity(id: i.menuItemId ?? 0, groupId: 0, groupName: '', name: i.menuItemName, price: i.unitPrice, costPrice: i.costPrice),
+      quantity: i.quantity, unitPrice: i.unitPrice, costPrice: i.costPrice, notes: i.notes,
+      status: OrderItemStatus.values.firstWhere((s) => s.name == i.status, orElse: () => OrderItemStatus.pending),
+      modifiers: mods, isVoided: i.isVoided, sentToKitchenAt: i.sentToKitchenAt,
+      dealId: i.dealId, dealItemsJson: i.dealItemsJson, isCustomItem: i.isCustomItem,
+    );
+  }).toList();
+  List<PaymentSplit> splits = [];
+  try {
+    final d = jsonDecode(inv.paymentSplitsJson) as List;
+    splits = d.map((s) => PaymentSplit(
+      method: PaymentMethod.values.firstWhere((m) => m.name == s['method'], orElse: () => PaymentMethod.cash),
+      amount: (s['amount'] as num).toDouble(),
+    )).toList();
+  } catch (_) {}
+  return InvoiceEntity(
+    id: inv.id, invoiceNumber: inv.invoiceNumber, orderId: inv.orderId,
+    orderNumber: inv.orderNumber, tableName: inv.tableNameCol, waiterName: inv.waiterName,
+    items: items, subtotal: inv.subtotal, discountValue: inv.discountValue,
+    taxValue: inv.taxValue, serviceChargeValue: inv.serviceChargeValue,
+    grandTotal: inv.grandTotal, amountPaid: inv.amountPaid, changeAmount: inv.changeAmount,
+    paymentMethod: PaymentMethod.values.firstWhere((m) => m.name == inv.paymentMethod, orElse: () => PaymentMethod.cash),
+    status: BillStatus.final_, createdAt: inv.createdAt, paymentSplits: splits,
+  );
+}
+
+void _showInvoiceDetail(WidgetRef ref, BuildContext ctx, InvoiceRow inv, String sym) {
+  showDialog(context: ctx, builder: (dialogCtx) {
+    final width = MediaQuery.of(dialogCtx).size.width * 0.42;
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: width.clamp(380, 560)),
+        child: FutureBuilder<InvoiceEntity>(
+          future: _buildInvoiceEntity(ref, inv),
+          builder: (_, snap) {
+            if (!snap.hasData) {
+              return const SizedBox(height: 200, child: Center(child: CircularProgressIndicator()));
+            }
+            final entity = snap.data!;
+            final sym_ = sym;
+            return Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: dialogCtx.cs.primary.withAlpha(15),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Text(entity.invoiceNumber, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: dialogCtx.cs.primary)),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(color: Colors.green.withAlpha(20), borderRadius: BorderRadius.circular(5)),
+                      child: Text(entity.paymentMethod.name.toUpperCase(), style: const TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.w700)),
+                    ),
+                  ]),
+                  const SizedBox(height: 4),
+                  Text('Table: ${entity.tableName}  |  Waiter: ${entity.waiterName}', style: TextStyle(fontSize: 12, color: dialogCtx.cs.onSurfaceVariant)),
+                  Text(DateFormat('dd MMM yyyy, h:mm a').format(entity.createdAt), style: TextStyle(fontSize: 11, color: dialogCtx.cs.onSurfaceVariant)),
+                ]),
+              ),
+              Flexible(child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('ITEMS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: dialogCtx.cs.onSurfaceVariant, letterSpacing: 0.6)),
+                  const SizedBox(height: 6),
+                  ...entity.items.where((i) => !i.isVoided).map((item) => Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(children: [
+                      Text('${item.quantity}x', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(item.menuItem.name, style: const TextStyle(fontSize: 13))),
+                      Text('$sym_ ${item.lineTotal.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                    ]),
+                  )),
+                  if (entity.items.any((i) => i.isVoided)) ...[
+                    const SizedBox(height: 4),
+                    Text('Voided: ${entity.items.where((i) => i.isVoided).length} item(s)', style: TextStyle(fontSize: 11, color: Colors.red.shade400)),
+                  ],
+                ]),
+              )),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(border: Border(top: BorderSide(color: dialogCtx.border, width: 0.5))),
+                child: Column(children: [
+                  _detailRow('Subtotal', '$sym_ ${entity.subtotal.toStringAsFixed(0)}'),
+                  if (entity.discountValue > 0) _detailRow('Discount', '-$sym_ ${entity.discountValue.toStringAsFixed(0)}'),
+                  if (entity.taxValue > 0) _detailRow('Tax', '$sym_ ${entity.taxValue.toStringAsFixed(0)}'),
+                  if (entity.serviceChargeValue > 0) _detailRow('Service', '$sym_ ${entity.serviceChargeValue.toStringAsFixed(0)}'),
+                  Divider(color: dialogCtx.border),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    const Text('TOTAL', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                    Text('$sym_ ${entity.grandTotal.toStringAsFixed(0)}', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: dialogCtx.cs.primary)),
+                  ]),
+                  const SizedBox(height: 4),
+                  _detailRow('Paid', '$sym_ ${entity.amountPaid.toStringAsFixed(0)}'),
+                  if (entity.changeAmount > 0) _detailRow('Change', '$sym_ ${entity.changeAmount.toStringAsFixed(0)}'),
+                  const SizedBox(height: 12),
+                  Row(children: [
+                    Expanded(child: OutlinedButton.icon(
+                      icon: const Icon(Icons.close, size: 16),
+                      label: const Text('Close'),
+                      onPressed: () => Navigator.pop(dialogCtx),
+                    )),
+                    const SizedBox(width: 10),
+                    Expanded(child: FilledButton.icon(
+                      icon: const Icon(Icons.print_rounded, size: 16),
+                      label: const Text('Print Receipt'),
+                      onPressed: () async {
+                        Navigator.pop(dialogCtx);
+                        try {
+                          await PrintService.instance.printFinalReceipt(entity);
+                        } catch (e) {
+                          showError(ctx, e is PrintException ? e.message : 'Print failed: $e');
+                        }
+                      },
+                    )),
+                  ]),
+                ]),
+              ),
+            ]);
+          },
+        ),
+      ),
+    );
+  });
+}
+
+Widget _detailRow(String label, String value) => Padding(
+  padding: const EdgeInsets.symmetric(vertical: 2),
+  child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+    Text(label, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+    Text(value, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+  ]),
+);
 
 class _ReportKPI extends StatelessWidget {
   const _ReportKPI(this.label, this.value, this.icon, this.color);
@@ -1413,9 +1543,7 @@ class _ZReportTabState extends ConsumerState<_ZReportTab> {
   Future<void> _loadHistory() async {
     setState(() => _loadingHistory = true);
     final db = ref.read(dbProvider);
-    final dayStart = DateTime(_selectedDay.year, _selectedDay.month, _selectedDay.day);
-    final dayEnd = dayStart.add(const Duration(days: 1));
-    final regs = await db.registerDao.historyForPeriod(dayStart, dayEnd);
+    final regs = await db.registerDao.historyForBusinessDay(_selectedDay);
     if (mounted) setState(() { _closedShifts = regs; _loadingHistory = false; });
   }
 
@@ -1441,7 +1569,7 @@ class _ZReportTabState extends ConsumerState<_ZReportTab> {
               const SizedBox(width: 10),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 const Text('Z Report — End of Day Closing', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.red)),
-                Text('Running this will close the shift and reset all counters.', style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant)),
+                Text('Shift ${register.shiftNumber} · Business day ${DateFormat('dd MMM yyyy').format(register.businessDate ?? register.openedAt)}', style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant)),
               ])),
             ]),
           ),
@@ -1514,6 +1642,16 @@ class _ZReportTabState extends ConsumerState<_ZReportTab> {
                   style: FilledButton.styleFrom(backgroundColor: Colors.red, padding: const EdgeInsets.symmetric(vertical: 14)),
                 )),
               ]),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  icon: const Icon(Icons.warning_amber_rounded, size: 16),
+                  label: const Text('Force Close Shift (Manager)'),
+                  style: TextButton.styleFrom(foregroundColor: Colors.deepOrange),
+                  onPressed: _closing ? null : () => _forceCloseShift(register, user?.name ?? 'System'),
+                ),
+              ),
             ])),
           )),
           const SizedBox(height: 30),
@@ -1633,7 +1771,7 @@ class _ZReportTabState extends ConsumerState<_ZReportTab> {
       title: Row(children: [
         const Icon(Icons.receipt_long, size: 20),
         const SizedBox(width: 8),
-        Text('Z Report — ${DateFormat("dd MMM yyyy").format(reg.openedAt)}'),
+        Text('Z Report — Shift #${reg.id} · ${DateFormat("dd MMM yyyy").format(reg.openedAt)}'),
       ]),
       content: SizedBox(width: 450, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
@@ -1698,6 +1836,7 @@ class _ZReportTabState extends ConsumerState<_ZReportTab> {
               totalExpenses: reg.totalExpenses, cashIn: reg.cashIn, cashOut: reg.cashOut,
               totalOrders: reg.totalOrders, totalKitchenTickets: reg.totalKitchenTickets,
               totalDiscounts: reg.totalDiscounts, totalTax: reg.totalTax, totalVoids: reg.totalVoids,
+              businessDate: reg.businessDate, cashVariance: reg.cashVariance, closeReason: reg.closeReason,
             ), reg.closingCash);
           },
         ),
@@ -1720,6 +1859,69 @@ class _ZReportTabState extends ConsumerState<_ZReportTab> {
     if (mounted) {
       setState(() { _closing = false; _loadHistory(); });
       showSuccess(context, 'Shift closed. Z Report printed.');
+    }
+  }
+
+  Future<void> _forceCloseShift(CashRegisterEntity reg, String closedBy) async {
+    final user = ref.read(authProvider).user;
+    if (user != null && !user.can('close_register')) {
+      if (mounted) showError(context, 'Only a manager/admin can force-close a shift.');
+      return;
+    }
+    final reasonCtrl = TextEditingController();
+    final cashCtrl = TextEditingController(text: reg.expectedCash.toStringAsFixed(0));
+    var chosenReason = <String>[];
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: Text('Force Close Shift ${reg.shiftNumber}'),
+        content: SizedBox(
+          width: 420,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text('Use only when the cashier forgot to close the shift. This records the reason in the audit log.', style: TextStyle(fontSize: 12)),
+            const SizedBox(height: 16),
+            TextField(
+              controller: cashCtrl,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
+              decoration: InputDecoration(labelText: 'Actual closing cash', prefixText: '${ref.read(settingsProvider).currencySymbol} '),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonCtrl,
+              decoration: const InputDecoration(labelText: 'Reason (required)', hintText: 'e.g. Cashier forgot to close, handover'),
+            ),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.deepOrange),
+            onPressed: () {
+              final reason = reasonCtrl.text.trim();
+              if (reason.isEmpty) {
+                showError(dctx, 'Reason is required to force-close.');
+                return;
+              }
+              chosenReason = [reason];
+              Navigator.pop(dctx, true);
+            },
+            child: const Text('Force Close'),
+          ),
+        ],
+      ),
+    );
+    final reason = chosenReason.isEmpty ? reasonCtrl.text.trim() : chosenReason.first;
+    final closingCash = double.tryParse(cashCtrl.text) ?? reg.expectedCash;
+    cashCtrl.dispose();
+    reasonCtrl.dispose();
+    if (ok != true) return;
+    setState(() => _closing = true);
+    await PrintService.instance.printZReport(reg, closingCash);
+    await ref.read(registerProvider.notifier).forceCloseRegister(closedBy, closingCash, reason);
+    if (mounted) {
+      setState(() { _closing = false; _loadHistory(); });
+      showSuccess(context, 'Shift force-closed. Z Report printed.');
     }
   }
 }
@@ -2556,7 +2758,14 @@ class _CashRegisterScreenState extends ConsumerState<CashRegisterScreen> {
       appBar: AppBar(
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => context.go('/dashboard')),
         title: const Text('Cash Register'),
-        actions: [const TopBarActions()],
+        actions: [
+          TextButton.icon(
+            icon: const Icon(Icons.history_rounded, size: 16),
+            label: const Text('Audit Log'),
+            onPressed: () => context.go('/shift-audit'),
+          ),
+          const TopBarActions(),
+        ],
       ),
       body: register == null ? _OpenRegisterView(ctrl: _openCashCtrl, user: user, sym: sym) : _OpenRegisterPanel(register: register, user: user, sym: sym),
     ));
@@ -4065,6 +4274,123 @@ class _AboutSettingsState extends ConsumerState<_AboutSettings> {
     return Row(children: [
       SizedBox(width: 100, child: Text(label, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: cs.onSurfaceVariant))),
       Expanded(child: Text(value, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13))),
+    ]);
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// SHIFT AUDIT LOG — trail of open/close/force-close events
+// ═══════════════════════════════════════════════════════
+class ShiftAuditScreen extends ConsumerStatefulWidget {
+  const ShiftAuditScreen({super.key});
+  @override ConsumerState<ShiftAuditScreen> createState() => _ShiftAuditScreenState();
+}
+
+class _ShiftAuditScreenState extends ConsumerState<ShiftAuditScreen> {
+  final _queryCtrl = TextEditingController();
+  int? _filterShift;
+  List<ShiftAuditLog> _logs = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  @override
+  void dispose() { _queryCtrl.dispose(); super.dispose(); }
+
+  Future<void> _load() async {
+    final db = ref.read(dbProvider);
+    final all = await db.registerDao.allAuditLogs();
+    if (mounted) setState(() { _logs = all; _loading = false; });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = ref.watch(authProvider).user;
+    final canView = user != null && (user.can('close_register') || user.role == UserRole.admin || user.role == UserRole.manager);
+    return SideNav(child: Scaffold(
+      appBar: AppBar(
+        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => context.go('/cash-register')),
+        title: const Text('Shift Audit Log'),
+        actions: [const TopBarActions()],
+      ),
+      body: canView ? _buildLog() : const Center(child: Text('Admin/Manager access required.')),
+    ));
+  }
+
+  Widget _buildLog() {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    final q = _queryCtrl.text.trim().toLowerCase();
+    var shown = _logs;
+    if (_filterShift != null) shown = shown.where((l) => l.shiftId == _filterShift).toList();
+    if (q.isNotEmpty) {
+      shown = shown.where((l) =>
+        l.action.toLowerCase().contains(q) ||
+        (l.userName ?? '').toLowerCase().contains(q) ||
+        (l.reason ?? '').toLowerCase().contains(q)).toList();
+    }
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(children: [
+          Expanded(child: TextField(
+            controller: _queryCtrl,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              prefixIcon: const Icon(Icons.search, size: 18),
+              hintText: 'Search action / user / reason…',
+              isDense: true,
+            ),
+          )),
+          const SizedBox(width: 12),
+          DropdownButton<int?>(
+            value: _filterShift,
+            hint: const Text('All shifts'),
+            items: [
+              const DropdownMenuItem<int?>(value: null, child: Text('All shifts')),
+              ...{for (final l in _logs) l.shiftId}.map((s) => DropdownMenuItem<int?>(value: s, child: Text('Shift $s'))),
+            ],
+            onChanged: (v) => setState(() => _filterShift = v),
+          ),
+        ]),
+      ),
+      Expanded(child: ListView.separated(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        itemCount: shown.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 8),
+        itemBuilder: (_, i) {
+          final l = shown[i];
+          final IconData icon = l.action.contains('FORCE') ? Icons.warning_amber_rounded
+            : l.action.contains('OPEN') ? Icons.lock_open_rounded
+            : Icons.lock_rounded;
+          final Color color = l.action.contains('FORCE') ? Colors.deepOrange
+            : l.action.contains('OPEN') ? Colors.green : Colors.blueGrey;
+          return AppCard(padding: const EdgeInsets.all(12), child: Row(children: [
+            Container(padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(color: color.withAlpha(25), shape: BoxShape.circle),
+              child: Icon(icon, color: color, size: 18)),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Text(l.action.replaceAll('_', ' '), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                const SizedBox(width: 8),
+                Text('Shift #${l.shiftId}', style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant)),
+                const Spacer(),
+                Text(DateFormat('dd MMM HH:mm').format(l.createdAt), style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant)),
+              ]),
+              const SizedBox(height: 4),
+              Text('by ${l.userName ?? 'System'}', style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant)),
+              if ((l.reason ?? '').isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text('Reason: ${l.reason}', style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic)),
+              ],
+            ])),
+          ]));
+        },
+      )),
     ]);
   }
 }

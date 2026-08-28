@@ -41,6 +41,7 @@ typedef CustomerRow = Customer;
 typedef CreditLedgerRow = CreditLedgerData;
 typedef ExpenseRow = Expense;
 typedef CashRegisterRow = CashRegister;
+typedef ShiftAuditLogRow = ShiftAuditLog;
 typedef AttendanceRow = AttendanceData;
 typedef SalaryPaymentRow = SalaryPayment;
 typedef DealRow = Deal;
@@ -137,6 +138,9 @@ class Orders extends Table {
   IntColumn get guestCount => integer().withDefault(const Constant(1))();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get paidAt => dateTime().nullable()();
+  IntColumn get shiftId => integer().nullable()();
+  IntColumn get registerId => integer().nullable()();
+  DateTimeColumn get businessDate => dateTime().nullable()();
 }
 
 class OrderItems extends Table {
@@ -180,6 +184,9 @@ class Invoices extends Table {
   IntColumn get customerId => integer().nullable()();
   BoolColumn get isVoided => boolean().withDefault(const Constant(false))();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+  IntColumn get shiftId => integer().nullable()();
+  IntColumn get registerId => integer().nullable()();
+  DateTimeColumn get businessDate => dateTime().nullable()();
 }
 
 class Customers extends Table {
@@ -236,6 +243,22 @@ class CashRegisters extends Table {
   RealColumn get totalDiscounts => real().withDefault(const Constant(0.0))();
   RealColumn get totalTax => real().withDefault(const Constant(0.0))();
   IntColumn get totalVoids => integer().withDefault(const Constant(0))();
+  DateTimeColumn get businessDate => dateTime().nullable()();
+  RealColumn get cashVariance => real().withDefault(const Constant(0.0))();
+  TextColumn get closeReason => text().nullable()();
+}
+
+class ShiftAuditLogs extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get action => text()(); // SHIFT_OPENED, SHIFT_CLOSED, SHIFT_FORCE_CLOSED, CASH_ADJUSTMENT, etc.
+  IntColumn get userId => integer().nullable()();
+  TextColumn get userName => text()();
+  IntColumn get shiftId => integer().nullable()();
+  TextColumn get shiftNumber => text().nullable()();
+  TextColumn get reason => text().nullable()();
+  TextColumn get oldValue => text().nullable()();
+  TextColumn get newValue => text().nullable()();
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
 }
 
 class Expenses extends Table {
@@ -446,6 +469,8 @@ class OrderDao extends DatabaseAccessor<AppDatabase> with _$OrderDaoMixin {
     (select(orders)..where((o) => o.id.equals(id))).getSingleOrNull();
   Future<OrderRow?> activeForTable(int tableId) =>
     (select(orders)..where((o) => o.tableId.equals(tableId) & o.status.isNotIn(['paid', 'cancelled']))).getSingleOrNull();
+  Future<List<OrderRow>> activeOrdersForTable(int tableId) =>
+    (select(orders)..where((o) => o.tableId.equals(tableId) & o.status.isNotIn(['paid', 'cancelled']))).get();
   Future<List<OrderItemRow>> itemsForOrder(int orderId) =>
     (select(orderItems)..where((i) => i.orderId.equals(orderId))..orderBy([(i) => OrderingTerm.asc(i.id)])).get();
   Stream<List<OrderItemRow>> watchItemsForOrder(int orderId) =>
@@ -457,6 +482,15 @@ class OrderDao extends DatabaseAccessor<AppDatabase> with _$OrderDaoMixin {
   Future<void> removeItem(int id) => (delete(orderItems)..where((i) => i.id.equals(id))).go();
   Future<List<OrderRow>> forPeriod(DateTime start, DateTime end) =>
     (select(orders)..where((o) => o.createdAt.isBetweenValues(start, end))..orderBy([(o) => OrderingTerm.desc(o.createdAt)])).get();
+  Future<List<OrderRow>> forShift(int shiftId) =>
+    (select(orders)..where((o) => o.shiftId.equals(shiftId))..orderBy([(o) => OrderingTerm.asc(o.createdAt)])).get();
+  Future<List<OrderRow>> withNullShift() =>
+    (select(orders)..where((o) => o.shiftId.isNull())).get();
+  Future<List<OrderRow>> byBusinessDate(DateTime day) {
+    final d = DateTime(day.year, day.month, day.day);
+    final next = d.add(const Duration(days: 1));
+    return (select(orders)..where((o) => o.businessDate.isBetweenValues(d, next))..orderBy([(o) => OrderingTerm.asc(o.createdAt)])).get();
+  }
   Future<bool> hasOrdersForTable(int tableId) async {
     final countExp = orders.id.count();
     final query = selectOnly(orders)
@@ -523,6 +557,23 @@ class InvoiceDao extends DatabaseAccessor<AppDatabase> with _$InvoiceDaoMixin {
     (select(invoices)..where((i) => i.createdAt.isBetweenValues(start, end) & i.isVoided.equals(false))..orderBy([(i) => OrderingTerm.desc(i.createdAt)])).get();
   Future<InvoiceRow?> byOrder(int orderId) =>
     (select(invoices)..where((i) => i.orderId.equals(orderId) & i.isVoided.equals(false))).getSingleOrNull();
+  Future<List<InvoiceRow>> byShift(int shiftId) =>
+    (select(invoices)..where((i) => i.shiftId.equals(shiftId) & i.isVoided.equals(false))..orderBy([(i) => OrderingTerm.asc(i.createdAt)])).get();
+  Future<List<InvoiceRow>> byShiftIncludingVoided(int shiftId) =>
+    (select(invoices)..where((i) => i.shiftId.equals(shiftId))..orderBy([(i) => OrderingTerm.asc(i.createdAt)])).get();
+  Future<List<InvoiceRow>> withNullShift() =>
+    (select(invoices)..where((i) => i.shiftId.isNull())).get();
+  Future<List<InvoiceRow>> byBusinessDate(DateTime day) {
+    final d = DateTime(day.year, day.month, day.day);
+    final next = d.add(const Duration(days: 1));
+    return (select(invoices)
+      ..where((i) => i.businessDate.isBetweenValues(d, next) & i.isVoided.equals(false))
+      ..orderBy([(i) => OrderingTerm.asc(i.createdAt)])).get();
+  }
+  Future<void> updateShift(int id, int shiftId, int registerId, DateTime businessDate) =>
+    (update(invoices)..where((i) => i.id.equals(id))).write(InvoicesCompanion(
+      shiftId: Value(shiftId), registerId: Value(registerId), businessDate: Value(businessDate),
+    ));
 }
 
 @DriftAccessor(tables: [Customers, CreditLedger])
@@ -550,7 +601,7 @@ class CustomerDao extends DatabaseAccessor<AppDatabase> with _$CustomerDaoMixin 
     (select(customers)..where((c) => c.name.equals(name))).getSingleOrNull();
 }
 
-@DriftAccessor(tables: [CashRegisters, Expenses, CashTransactions])
+@DriftAccessor(tables: [CashRegisters, Expenses, CashTransactions, ShiftAuditLogs])
 class RegisterDao extends DatabaseAccessor<AppDatabase> with _$RegisterDaoMixin {
   RegisterDao(super.db);
   Future<CashRegisterRow?> openRegister() =>
@@ -603,6 +654,44 @@ class RegisterDao extends DatabaseAccessor<AppDatabase> with _$RegisterDaoMixin 
     (select(cashRegisters)..orderBy([(r) => OrderingTerm.desc(r.openedAt)])).watch();
   Future<List<CashRegisterRow>> historyForPeriod(DateTime start, DateTime end) =>
     (select(cashRegisters)..where((r) => r.openedAt.isBetweenValues(start, end))..orderBy([(r) => OrderingTerm.desc(r.openedAt)])).get();
+  Future<List<CashRegisterRow>> historyForBusinessDay(DateTime day) {
+    final d = DateTime(day.year, day.month, day.day);
+    final next = d.add(const Duration(days: 1));
+    return (select(cashRegisters)
+      ..where((r) => r.businessDate.isBetweenValues(d, next))
+      ..orderBy([(r) => OrderingTerm.desc(r.openedAt)])).get();
+  }
+  Future<CashRegisterRow?> byId(int id) =>
+    (select(cashRegisters)..where((r) => r.id.equals(id))).getSingleOrNull();
+  Future<List<CashRegisterRow>> allShifts() =>
+    (select(cashRegisters)..orderBy([(r) => OrderingTerm.desc(r.openedAt)])).get();
+  Future<List<CashRegisterRow>> shiftsForPeriod(DateTime start, DateTime end) =>
+    (select(cashRegisters)
+      ..where((r) => r.openedAt.isBetweenValues(start, end))
+      ..orderBy([(r) => OrderingTerm.desc(r.openedAt)])).get();
+
+  /// Returns the single register/shift whose open→close window contains [ts].
+  /// Historically only one register was ever open at a time, so this is
+  /// unambiguous. Used to backfill `shift_id` for invoices created before
+  /// the shift field existed.
+  Future<CashRegisterRow?> shiftContaining(DateTime ts) async {
+    final rows = await (select(cashRegisters)..orderBy([(r) => OrderingTerm.asc(r.openedAt)])).get();
+    for (final r in rows) {
+      final opened = r.openedAt;
+      final closed = r.closedAt ?? opened.add(const Duration(days: 365 * 5));
+      if (!ts.isBefore(opened) && !ts.isAfter(closed)) return r;
+    }
+    return null;
+  }
+
+  // ── Shift Audit Log ───────────────────────────────
+  Future<int> addAuditLog(ShiftAuditLogsCompanion c) => into(shiftAuditLogs).insert(c);
+  Stream<List<ShiftAuditLogRow>> watchAuditLogsForShift(int shiftId) =>
+    (select(shiftAuditLogs)..where((l) => l.shiftId.equals(shiftId))..orderBy([(l) => OrderingTerm.desc(l.createdAt)])).watch();
+  Future<List<ShiftAuditLogRow>> auditLogsForShift(int shiftId) =>
+    (select(shiftAuditLogs)..where((l) => l.shiftId.equals(shiftId))..orderBy([(l) => OrderingTerm.desc(l.createdAt)])).get();
+  Future<List<ShiftAuditLogRow>> allAuditLogs() =>
+    (select(shiftAuditLogs)..orderBy([(l) => OrderingTerm.desc(l.createdAt)])).get();
 }
 
 @DriftAccessor(tables: [Attendance, SalaryPayments])
@@ -670,12 +759,12 @@ class SettingsDao extends DatabaseAccessor<AppDatabase> with _$SettingsDaoMixin 
   Users, Floors, RestaurantTables, MenuGroups, MenuItems,
   Orders, OrderItems, Invoices, Customers, CreditLedger,
   InventoryItems, CashRegisters, Expenses, CashTransactions, Attendance,
-  SalaryPayments, AppSettings, Deals, DealItems, BackupHistories,
+  SalaryPayments, AppSettings, Deals, DealItems, BackupHistories, ShiftAuditLogs,
 ], daos: [UserDao, TableDao, MenuDao, OrderDao, InvoiceDao, CustomerDao, RegisterDao, HRDao, SettingsDao, DealDao])
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _open());
 
-  @override int get schemaVersion => 7;
+  @override int get schemaVersion => 8;
 
   @override MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) async {
@@ -737,12 +826,55 @@ class AppDatabase extends _$AppDatabase {
         await customStatement('DROP TABLE order_items');
         await customStatement('ALTER TABLE order_items_new RENAME TO order_items');
       }
+      if (from < 8) {
+        await m.createTable(shiftAuditLogs);
+        await m.addColumn(cashRegisters, cashRegisters.businessDate);
+        await m.addColumn(cashRegisters, cashRegisters.cashVariance);
+        await m.addColumn(cashRegisters, cashRegisters.closeReason);
+        await m.addColumn(orders, orders.shiftId);
+        await m.addColumn(orders, orders.registerId);
+        await m.addColumn(orders, orders.businessDate);
+        await m.addColumn(invoices, invoices.shiftId);
+        await m.addColumn(invoices, invoices.registerId);
+        await m.addColumn(invoices, invoices.businessDate);
+      }
     },
     beforeOpen: (m) async {
       if (m.wasCreated) return;
       await _ensureDeliveryFloor();
+      await _backfillShifts();
     },
   );
+
+  /// Idempotent backfill: assigns shift_id/register_id/business_date to any
+  /// historical order/invoice that predates the shift field. Because only one
+  /// register was ever open at a time, the single register whose open→close
+  /// window contains the transaction's timestamp is unambiguously its shift.
+  Future<void> _backfillShifts() async {
+    try {
+      final nullOrders = await orderDao.withNullShift();
+      for (final o in nullOrders) {
+        final shift = await registerDao.shiftContaining(o.createdAt);
+        if (shift != null) {
+          final bd = shift.businessDate ?? DateTime(o.createdAt.year, o.createdAt.month, o.createdAt.day);
+          await orderDao.updateOrder(OrdersCompanion(
+            id: Value(o.id), shiftId: Value(shift.id),
+            registerId: Value(shift.id), businessDate: Value(bd),
+          ));
+        }
+      }
+      final nullInvoices = await invoiceDao.withNullShift();
+      for (final inv in nullInvoices) {
+        final shift = await registerDao.shiftContaining(inv.createdAt);
+        if (shift != null) {
+          final bd = shift.businessDate ?? DateTime(inv.createdAt.year, inv.createdAt.month, inv.createdAt.day);
+          await invoiceDao.updateShift(inv.id, shift.id, shift.id, bd);
+        }
+      }
+    } catch (_) {
+      // Non-fatal — leave any unmapped rows NULL; they stay in date reports.
+    }
+  }
 
   Future<void> _ensureDeliveryFloor() async {
     final existing = await select(floors).get();

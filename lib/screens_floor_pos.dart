@@ -271,10 +271,14 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
           onPressed: () async {
             Navigator.pop(ctx);
             final waiterName = waiterCtrl.text.trim();
-            await ref.read(posProvider(table.id).notifier).openTableWithWaiter(
-              guests, waiterName: waiterName,
-            );
-            if (mounted) context.go('/pos/${table.id}');
+            try {
+              await ref.read(posProvider(table.id).notifier).openTableWithWaiter(
+                guests, waiterName: waiterName,
+              );
+              if (mounted) context.go('/pos/${table.id}');
+            } on ShiftRequiredException {
+              if (mounted) showMoveToRegister(context);
+            }
           },
           child: const Text('Open Table'),
         ),
@@ -347,12 +351,16 @@ class _FloorScreenState extends ConsumerState<FloorScreen> {
             Navigator.pop(ctx);
             final waiterName = waiterCtrl.text.trim();
             final charges = double.tryParse(deliveryChargesCtrl.text.trim()) ?? 0;
-            await ref.read(posProvider(rider.id).notifier).openTableWithWaiter(
-              1, waiterName: waiterName, orderType: 'delivery',
-              riderId: rider.id, riderName: rider.name,
-              deliveryCharges: charges,
-            );
-            if (mounted) context.go('/pos/${rider.id}');
+            try {
+              await ref.read(posProvider(rider.id).notifier).openTableWithWaiter(
+                1, waiterName: waiterName, orderType: 'delivery',
+                riderId: rider.id, riderName: rider.name,
+                deliveryCharges: charges,
+              );
+              if (mounted) context.go('/pos/${rider.id}');
+            } on ShiftRequiredException {
+              if (mounted) showMoveToRegister(context);
+            }
           },
           child: const Text('Start Delivery'),
         ),
@@ -915,6 +923,7 @@ class _POSScreenState extends ConsumerState<POSScreen> {
             onBill: order != null && order.activeItems.isNotEmpty ? _printBill : null,
             onPay: order != null && order.activeItems.isNotEmpty ? _showPaymentDialog : null,
             onAddCustomItem: _showAddCustomItemDialog,
+            onToggleServiceCharge: (enabled) => ref.read(posProvider(widget.tableId).notifier).toggleServiceCharge(enabled: enabled),
           ),
         ),
       ]),
@@ -1097,6 +1106,9 @@ class _POSScreenState extends ConsumerState<POSScreen> {
     await db.tableDao.setStatus(sel.id, 'occupied',
         orderId: order.id, waiterName: order.waiterName,
         guestCount: order.guestCount, orderStartTime: order.createdAt);
+    // Clear old table's POS state so it won't show stale order
+    ref.invalidate(posProvider(widget.tableId));
+    ref.read(posProvider(widget.tableId).notifier).state = const AsyncValue.data(null);
     // Navigate to new table POS
     if (mounted) context.go('/pos/${sel.id}');
   }
@@ -1237,10 +1249,16 @@ class _POSScreenState extends ConsumerState<POSScreen> {
       builder: (_) => _PaymentDialog(
         order: order,
         onPay: (method, amountPaid, splits, custName, custPhone) async {
-          final inv = await ref.read(posProvider(widget.tableId).notifier).processPayment(
-            method: method, amountPaid: amountPaid, splits: splits,
-            customerName: custName, customerPhone: custPhone,
-          );
+          InvoiceEntity? inv;
+          try {
+            inv = await ref.read(posProvider(widget.tableId).notifier).processPayment(
+              method: method, amountPaid: amountPaid, splits: splits,
+              customerName: custName, customerPhone: custPhone,
+            );
+          } on ShiftRequiredException {
+            if (mounted) showMoveToRegister(context);
+            return;
+          }
           if (inv != null) {
             // Print final receipt (respects auto-print setting)
             final autoPrint = ref.read(settingsProvider).autoPrintBillOnPay;
@@ -1697,6 +1715,7 @@ class _CartPanel extends ConsumerWidget {
     required this.order, required this.tableId,
     required this.onQtyChange, required this.onVoidItem, required this.onPrintItem,
     required this.onDiscount, this.onKitchen, this.onBill, this.onPay, this.onAddCustomItem,
+    this.onToggleServiceCharge,
   });
   final OrderEntity? order;
   final int tableId;
@@ -1708,6 +1727,7 @@ class _CartPanel extends ConsumerWidget {
   final VoidCallback? onBill;
   final VoidCallback? onPay;
   final VoidCallback? onAddCustomItem;
+  final void Function(bool enabled)? onToggleServiceCharge;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1776,8 +1796,24 @@ class _CartPanel extends ConsumerWidget {
               _SummaryRow('Subtotal', o.subtotal, settings.currencySymbol),
               if (o.discountValue > 0) _SummaryRow('Discount', -o.discountValue, settings.currencySymbol, color: Colors.green),
               if (o.taxValue > 0) _SummaryRow('GST (${o.taxPercent.toStringAsFixed(0)}%)', o.taxValue, settings.currencySymbol),
-              if (o.serviceChargeFixed > 0) _SummaryRow('Service Charge', o.serviceChargeFixed, settings.currencySymbol),
-              if (o.serviceChargePercentValue > 0) _SummaryRow('Service (${o.serviceChargePercent.toStringAsFixed(0)}%)', o.serviceChargePercentValue, settings.currencySymbol),
+              Row(children: [
+                Expanded(child: _SummaryRow(
+                  'Service',
+                  o.serviceChargeFixed + o.serviceChargePercentValue,
+                  settings.currencySymbol,
+                )),
+                if (onToggleServiceCharge != null)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: Transform.scale(
+                      scale: 0.75,
+                      child: Switch(
+                        value: o.serviceChargeFixed > 0 || o.serviceChargePercent > 0,
+                        onChanged: (v) => onToggleServiceCharge!(v),
+                      ),
+                    ),
+                  ),
+              ]),
               if (o.deliveryCharges > 0) _SummaryRow('Delivery Charges', o.deliveryCharges, settings.currencySymbol),
               const Divider(height: 12),
               Row(children: [

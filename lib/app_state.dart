@@ -24,6 +24,15 @@ final dbProvider = Provider<AppDatabase>((ref) {
 // ── Selected floor (persists across navigation) ───────
 final selectedFloorProvider = StateProvider<int?>((ref) => null);
 
+/// Thrown when a POS operation requires an open shift/register but none is
+/// open. The UI catches this and prompts the user to open a shift first.
+class ShiftRequiredException implements Exception {
+  final String message;
+  const ShiftRequiredException([this.message = 'No open shift. Please open a register first.']);
+  @override
+  String toString() => message;
+}
+
 // ── Initialization state ──────────────────────────────
 class InitState {
   const InitState({this.isLoading = true, this.hasAdmin = false});
@@ -336,6 +345,7 @@ Future<OrderEntity> _buildOrder(AppDatabase db, OrderRow r) async {
     notes: r.notes,
     kitchenTicketCount: r.kitchenTicketCount, guestCount: r.guestCount,
     createdAt: r.createdAt, paidAt: r.paidAt,
+    shiftId: r.shiftId, businessDate: r.businessDate,
   );
 }
 OrderStatus _orderStatus(String s) => OrderStatus.values.firstWhere((o) => o.name == s, orElse: () => OrderStatus.open);
@@ -352,27 +362,68 @@ class POSNotifier extends StateNotifier<AsyncValue<OrderEntity?>> {
   final Ref _ref;
   static const _uuid = Uuid();
 
+  /// Completes once the initial DB load finishes — prevents _ensureOrder
+  /// from racing with _load() and creating duplicate orders.
+  final _initLoad = Completer<void>();
+
   OrderEntity? get order => state.valueOrNull;
 
   Future<void> _load() async {
-    final row = await _db.orderDao.activeForTable(_tableId);
-    if (row != null) {
-      final o = await _buildOrder(_db, row);
-      state = AsyncValue.data(o);
-    } else {
-      state = const AsyncValue.data(null);
+    try {
+      final rows = await _db.orderDao.activeOrdersForTable(_tableId);
+      if (rows.isEmpty) {
+        state = const AsyncValue.data(null);
+      } else if (rows.length == 1) {
+        final o = await _buildOrder(_db, rows.first);
+        state = AsyncValue.data(o);
+      } else {
+        // Duplicate active orders — keep the newest, cancel the rest.
+        rows.sort((a, b) => b.id.compareTo(a.id));
+        final keep = rows.first;
+        for (final stale in rows.skip(1)) {
+          await _db.orderDao.updateOrder(OrdersCompanion(
+            id: Value(stale.id), status: const Value('cancelled'),
+          ));
+        }
+        final o = await _buildOrder(_db, keep);
+        state = AsyncValue.data(o);
+      }
+    } catch (_) {
+      // Don't corrupt state — keep whatever we had.
+      if (state is AsyncLoading) state = const AsyncValue.data(null);
+    } finally {
+      if (!_initLoad.isCompleted) _initLoad.complete();
     }
+  }
+
+  /// Waits for the initial load so we never race with the constructor.
+  Future<void> _waitInitLoad() async {
+    if (!_initLoad.isCompleted) await _initLoad.future;
   }
 
   // ── Create new order ─────────────────────────────
   Future<OrderEntity> _ensureOrder(int guestCount, {String? waiterName, String orderType = 'dine_in', int? riderId, String? riderName, double? deliveryCharges}) async {
+    await _waitInitLoad();
     if (order != null) return order!;
+
+    // Safety net: double-check DB — if an active order exists, load it
+    // instead of creating a duplicate (e.g. if state was wiped by an error).
+    final existing = await _db.orderDao.activeForTable(_tableId);
+    if (existing != null) {
+      await _load();
+      if (order != null) return order!;
+    }
     final settings = await _db.settingsDao.getAll();
     final now = DateTime.now();
     final num = '${now.hour.toString().padLeft(2,'0')}${now.minute.toString().padLeft(2,'0')}-${now.millisecond % 1000}';
     final resolvedWaiterName = (waiterName != null && waiterName.trim().isNotEmpty)
         ? waiterName.trim()
         : _currentUser.name;
+
+    // Strict shift: every order belongs to an open shift.
+    final reg = await _db.registerDao.openRegister();
+    if (reg == null) throw const ShiftRequiredException();
+    final businessDate = reg.businessDate ?? DateTime(now.year, now.month, now.day);
 
     final tableRow = await _db.tableDao.byId(_tableId);
     final id = await _db.orderDao.insertOrder(OrdersCompanion.insert(
@@ -389,6 +440,9 @@ class POSNotifier extends StateNotifier<AsyncValue<OrderEntity?>> {
       riderId: Value(riderId),
       riderName: Value(riderName),
       deliveryCharges: Value(deliveryCharges ?? 0.0),
+      shiftId: Value(reg.id),
+      registerId: Value(reg.id),
+      businessDate: Value(businessDate),
     ));
 
     await _db.tableDao.setStatus(_tableId, 'occupied',
@@ -586,6 +640,11 @@ class POSNotifier extends StateNotifier<AsyncValue<OrderEntity?>> {
     if (o == null) return null;
 
     final now = DateTime.now();
+
+    // Strict shift: payment requires an open shift and tags the invoice to it.
+    final reg = await _db.registerDao.openRegister();
+    if (reg == null) throw const ShiftRequiredException();
+    final businessDate = reg.businessDate ?? DateTime(now.year, now.month, now.day);
     final invNum = 'INV-${now.year}${now.month.toString().padLeft(2,'0')}${now.day.toString().padLeft(2,'0')}-${o.orderNumber}';
     final splitsJson = jsonEncode(splits.map((s) => {'method': s.method.name, 'amount': s.amount}).toList());
     final change = amountPaid - o.grandTotal;
@@ -640,6 +699,9 @@ class POSNotifier extends StateNotifier<AsyncValue<OrderEntity?>> {
       paymentSplitsJson: Value(splitsJson),
       status: const Value('final'),
       customerId: Value(resolvedCustomerId),
+      shiftId: Value(reg.id),
+      registerId: Value(reg.id),
+      businessDate: Value(businessDate),
     ));
 
     // Deduct stock for all order items:
@@ -677,8 +739,7 @@ class POSNotifier extends StateNotifier<AsyncValue<OrderEntity?>> {
     // Free the table
     await _db.tableDao.freeTable(_tableId);
 
-    // Update register
-    final reg = await _db.registerDao.openRegister();
+    // Update register (uses the active shift captured above)
     if (reg != null) {
       final cashAmt   = method == PaymentMethod.cash   ? o.grandTotal : (splits.where((s) => s.method == PaymentMethod.cash).fold(0.0, (a, s) => a + s.amount));
       final cardAmt   = method == PaymentMethod.card   ? o.grandTotal : (splits.where((s) => s.method == PaymentMethod.card).fold(0.0, (a, s) => a + s.amount));
@@ -711,6 +772,7 @@ class POSNotifier extends StateNotifier<AsyncValue<OrderEntity?>> {
       amountPaid: amountPaid, changeAmount: change > 0 ? change : 0,
       paymentMethod: method, status: BillStatus.final_,
       createdAt: now, customerId: resolvedCustomerId, paymentSplits: splits,
+      shiftId: reg.id, businessDate: businessDate,
     );
   }
 
@@ -750,6 +812,35 @@ class POSNotifier extends StateNotifier<AsyncValue<OrderEntity?>> {
     if (o == null) return;
     await _db.orderDao.updateOrder(OrdersCompanion(id: Value(o.id), guestCount: Value(count)));
     await _db.tableDao.setStatus(_tableId, 'occupied', guestCount: count);
+    await _load();
+  }
+
+  /// Toggle service charge on/off. When OFF, both percent and fixed are set to 0.
+  /// When ON, restores from settings.
+  bool get serviceChargeEnabled {
+    final o = order;
+    if (o == null) return true;
+    return o.serviceChargePercent > 0 || o.serviceChargeFixed > 0;
+  }
+
+  Future<void> toggleServiceCharge({required bool enabled}) async {
+    final o = order;
+    if (o == null) return;
+    if (enabled) {
+      final settings = await _db.settingsDao.getAll();
+      await _db.orderDao.updateOrder(OrdersCompanion(
+        id: Value(o.id),
+        serviceChargePercent: Value(double.tryParse(settings['service_charge_percent'] ?? '') ?? 0.0),
+        serviceChargeFixed: Value(double.tryParse(settings['service_charge_fixed'] ?? '') ?? 0.0),
+      ));
+    } else {
+      await _db.orderDao.updateOrder(OrdersCompanion(
+        id: Value(o.id),
+        serviceChargePercent: const Value(0.0),
+        serviceChargeFixed: const Value(0.0),
+      ));
+    }
+    await _refreshRunningTotal();
     await _load();
   }
 }
@@ -827,18 +918,68 @@ class RegisterNotifier extends StateNotifier<CashRegisterEntity?> {
   }
 
   Future<void> openRegister(String openedBy, double openingCash) async {
-    await _db.registerDao.open(CashRegistersCompanion.insert(
+    final now = DateTime.now();
+    final businessDate = DateTime(now.year, now.month, now.day);
+    // Prevent a second active shift while one is already open.
+    final existing = await _db.registerDao.openRegister();
+    if (existing != null) {
+      throw StateError('An active shift already exists. Close it before opening a new one.');
+    }
+    final id = await _db.registerDao.open(CashRegistersCompanion.insert(
       openedBy: openedBy, openingCash: openingCash,
+      businessDate: Value(businessDate),
+    ));
+    await _db.registerDao.addAuditLog(ShiftAuditLogsCompanion.insert(
+      action: 'SHIFT_OPENED',
+      userName: openedBy,
+      shiftId: Value(id),
+      shiftNumber: Value('#$id'),
     ));
     await _load();
   }
 
-  Future<CashRegisterEntity?> closeRegister(String closedBy, double closingCash) async {
+  Future<CashRegisterEntity?> closeRegister(String closedBy, double closingCash, {String? reason}) async {
     final reg = state;
     if (reg == null) return null;
+    final now = DateTime.now();
+    final variance = closingCash - reg.expectedCash;
     await _db.registerDao.update_(reg.id, CashRegistersCompanion(
       status: const Value('closed'), closedBy: Value(closedBy),
-      closedAt: Value(DateTime.now()), closingCash: Value(closingCash),
+      closedAt: Value(now), closingCash: Value(closingCash),
+      cashVariance: Value(variance), closeReason: Value(reason),
+    ));
+    await _db.registerDao.addAuditLog(ShiftAuditLogsCompanion.insert(
+      action: reason == null || reason.isEmpty ? 'SHIFT_CLOSED' : 'SHIFT_FORCE_CLOSED',
+      userName: closedBy,
+      shiftId: Value(reg.id),
+      shiftNumber: Value(reg.shiftNumber),
+      reason: Value(reason),
+      oldValue: Value('open'),
+      newValue: Value('closed'),
+    ));
+    final closed = state!.copyWith(closingCash);
+    state = null;
+    return closed;
+  }
+
+  Future<CashRegisterEntity?> forceCloseRegister(String closedBy, double closingCash, String reason) async {
+    final reg = state;
+    if (reg == null) return null;
+    final now = DateTime.now();
+    final variance = closingCash - reg.expectedCash;
+    await _db.registerDao.update_(reg.id, CashRegistersCompanion(
+      status: const Value('force_closed'), closedBy: Value(closedBy),
+      closedAt: Value(now), closingCash: Value(closingCash),
+      cashVariance: Value(variance), closeReason: Value(reason),
+    ));
+    await _db.registerDao.addAuditLog(ShiftAuditLogsCompanion.insert(
+      action: 'SHIFT_FORCE_CLOSED',
+      userName: closedBy,
+      shiftId: Value(reg.id),
+      shiftNumber: Value(reg.shiftNumber),
+      reason: Value(reason),
+      oldValue: Value('open'),
+      newValue: Value('force_closed'),
     ));
     final closed = state!.copyWith(closingCash);
     state = null;
@@ -968,6 +1109,7 @@ class RegisterNotifier extends StateNotifier<CashRegisterEntity?> {
     totalExpenses: r.totalExpenses, cashIn: r.cashIn, cashOut: r.cashOut,
     totalOrders: r.totalOrders, totalKitchenTickets: r.totalKitchenTickets,
     totalDiscounts: r.totalDiscounts, totalTax: r.totalTax, totalVoids: r.totalVoids,
+    businessDate: r.businessDate, cashVariance: r.cashVariance, closeReason: r.closeReason,
   );
 }
 
@@ -980,6 +1122,7 @@ extension RegCopyWith on CashRegisterEntity {
     totalExpenses: totalExpenses, cashIn: cashIn, cashOut: cashOut,
     totalOrders: totalOrders, totalKitchenTickets: totalKitchenTickets,
     totalDiscounts: totalDiscounts, totalTax: totalTax, totalVoids: totalVoids,
+    businessDate: businessDate, cashVariance: cashDifference, closeReason: closeReason,
   );
 }
 

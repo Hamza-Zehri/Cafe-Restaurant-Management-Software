@@ -2,6 +2,7 @@
 // PRINT SERVICE — Kitchen tickets, bills, invoices, reports
 // ═══════════════════════════════════════════════════════
 
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/services.dart' show rootBundle;
@@ -50,6 +51,11 @@ class ReportData {
   final int kitchenCompleted;
   final int voidedKitchen;
   final int kitchenItemsSent;
+  final double totalServiceCharge;
+  final double invoiceCashTotal;
+  final double invoiceCardTotal;
+  final double invoiceWalletTotal;
+  final double invoiceCreditTotal;
   final List<ReportItemStat> itemSales;
   final List<ReportItemStat> kitchenItems;
   const ReportData({
@@ -62,6 +68,11 @@ class ReportData {
     this.kitchenCompleted = 0,
     this.voidedKitchen = 0,
     this.kitchenItemsSent = 0,
+    this.totalServiceCharge = 0,
+    this.invoiceCashTotal = 0,
+    this.invoiceCardTotal = 0,
+    this.invoiceWalletTotal = 0,
+    this.invoiceCreditTotal = 0,
     this.itemSales = const [],
     this.kitchenItems = const [],
   });
@@ -133,7 +144,10 @@ class PrintService {
       await Printing.directPrintPdf(
         printer: printer,
         format: thermalFormat,
-        onLayout: (_) => build(fixedFormat),
+        onLayout: (_) async {
+          final bytes = await build(thermalFormat);
+          return bytes;
+        },
         name: name,
       );
     } else {
@@ -214,7 +228,23 @@ class PrintService {
     final now = DateTime.now();
     final invoices = await db.invoiceDao.forPeriod(since, now);
     final orders = await db.orderDao.forPeriod(since, now);
+    return _computeShiftData(invoices, orders);
+  }
 
+  /// Shift-accurate variant: gathers every transaction that belongs to the
+  /// given shift (by `shift_id`), so an overnight shift correctly includes
+  /// invoices created after midnight. This is what the X/Z reports use.
+  Future<ReportData> _collectShiftDataForShift(int shiftId) async {
+    final db = _db;
+    if (db == null) return const ReportData();
+    final invoices = await db.invoiceDao.byShiftIncludingVoided(shiftId);
+    final orders = await db.orderDao.forShift(shiftId);
+    return _computeShiftData(invoices, orders);
+  }
+
+  Future<ReportData> _computeShiftData(List<InvoiceRow> invoices, List<OrderRow> orders) async {
+    final db = _db;
+    if (db == null) return const ReportData();
     final soldQty = <String, int>{};
     final soldAmount = <String, double>{};
     final soldOrders = <String, Set<int>>{};
@@ -264,6 +294,33 @@ class PrintService {
       soldAmount[n] ?? 0,
     )).toList()..sort((a, b) => b.qty.compareTo(a.qty));
 
+    // Sum service charges from invoices in this shift
+    var totalSvc = 0.0;
+    double invCashTotal = 0, invCardTotal = 0, invWalletTotal = 0, invCreditTotal = 0;
+    for (final inv in invoices) {
+      totalSvc += inv.serviceChargeValue;
+      // Determine cash portion: prefer splits if present, else single method
+      final splits = inv.paymentSplitsJson.isNotEmpty
+          ? (jsonDecode(inv.paymentSplitsJson) as List)
+          : <dynamic>[];
+      if (splits.isEmpty) {
+        final m = inv.paymentMethod;
+        if (m == 'cash') invCashTotal += inv.grandTotal;
+        else if (m == 'card') invCardTotal += inv.grandTotal;
+        else if (m == 'wallet') invWalletTotal += inv.grandTotal;
+        else if (m == 'credit') invCreditTotal += inv.grandTotal;
+      } else {
+        for (final s in splits) {
+          final m = s['method'] as String? ?? 'cash';
+          final amt = (s['amount'] as num? ?? 0).toDouble();
+          if (m == 'cash') invCashTotal += amt;
+          else if (m == 'card') invCardTotal += amt;
+          else if (m == 'wallet') invWalletTotal += amt;
+          else if (m == 'credit') invCreditTotal += amt;
+        }
+      }
+    }
+
     return ReportData(
       completedOrders: orders.where((o) => o.status == 'paid').length,
       totalItemsSold: totalItems,
@@ -274,6 +331,11 @@ class PrintService {
       kitchenCompleted: kitchenCompleted,
       voidedKitchen: voidedKitchen,
       kitchenItemsSent: kitchenItemsSent,
+      totalServiceCharge: totalSvc,
+      invoiceCashTotal: invCashTotal,
+      invoiceCardTotal: invCardTotal,
+      invoiceWalletTotal: invWalletTotal,
+      invoiceCreditTotal: invCreditTotal,
       itemSales: itemStats,
       kitchenItems: itemStats.where((s) => s.kitchenQty > 0).toList(),
     );
@@ -325,7 +387,7 @@ class PrintService {
 
   // ── Z Report (end of day) ─────────────────────────
   Future<void> printZReport(CashRegisterEntity reg, double closingCash) async {
-    final data = await collectShiftData(reg.openedAt);
+    final data = await collectShiftDataForShift(reg.id);
     await _emit('Z-Report', (format) => _buildZReportPDF(format, reg, closingCash, data));
   }
 
@@ -333,9 +395,12 @@ class PrintService {
   /// per-item kitchen quantities before printing the Z report.
   Future<ReportData> collectShiftData(DateTime since) => _collectShiftData(since);
 
+  /// Shift-accurate stats for a given shift id (used by X/Z reports).
+  Future<ReportData> collectShiftDataForShift(int shiftId) => _collectShiftDataForShift(shiftId);
+
   // ── X Report (mid-shift) ──────────────────────────
   Future<void> printXReport(CashRegisterEntity reg) async {
-    final data = await collectShiftData(reg.openedAt);
+    final data = await collectShiftDataForShift(reg.id);
     await _emit('X-Report', (format) => _buildXReportPDF(format, reg, data));
   }
 
@@ -356,9 +421,7 @@ class PrintService {
           t.row('Order', '#${order.orderNumber}', size: 10, font: thermalBold),
           t.row('Table', order.tableName, size: 10, font: thermalBold),
           t.row('Waiter', order.waiterName, size: 9, font: thermalRegular),
-          if (order.guestCount > 0)
-            t.row('Guests', '${order.guestCount}', size: 9, font: thermalRegular),
-          t.row('Time', _tf.format(DateTime.now()), size: 9, font: thermalRegular),
+          t.row('Date/Time', _df.format(DateTime.now()), size: 9, font: thermalBold),
           pw.SizedBox(height: 4),
           t.dashedLine(),
           pw.SizedBox(height: 5),
@@ -384,8 +447,6 @@ class PrintService {
             ),
           t.center('Ticket #${ticketNumber ?? order.kitchenTicketCount + 1}  |  ${_tf.format(DateTime.now())}',
               font: thermalRegular, size: 8),
-          pw.SizedBox(height: 4),
-          t.credit(thermalRegular, 7),
           pw.SizedBox(height: 10),
         ],
       ),
@@ -403,7 +464,6 @@ class PrintService {
       build: (ctx) => pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          // Logo — top center, compact, original proportions preserved
           t.header(logo: logoImg, name: _settings.name),
           if (_settings.address.isNotEmpty)
             t.center(_settings.address, font: thermalRegular, size: 8),
@@ -423,12 +483,10 @@ class PrintService {
           pw.SizedBox(height: 3),
           t.dashedLine(),
           pw.SizedBox(height: 3),
-          // Column headers
           t.row('ITEM', 'AMOUNT', size: 8.5, font: thermalBold),
           pw.SizedBox(height: 2),
           t.dashedLine(h: 0.6),
           pw.SizedBox(height: 3),
-          // Items
           ...order.activeItems.map((item) => pw.Padding(
             padding: const pw.EdgeInsets.only(bottom: 3),
             child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
@@ -458,7 +516,6 @@ class PrintService {
           pw.SizedBox(height: 3),
           t.dashedLine(h: 1.4),
           pw.SizedBox(height: 3),
-          // Grand total — large and bold
           t.row('TOTAL', '${_settings.currencySymbol} ${order.grandTotal.toStringAsFixed(0)}', size: 15, font: thermalBold),
           pw.SizedBox(height: 4),
           t.dashedLine(),
@@ -696,13 +753,14 @@ class PrintService {
     final logoImg = await _getLogoImage();
     final sym = _settings.currencySymbol;
 
-    pdf.addPage(pw.MultiPage(
+    pdf.addPage(pw.Page(
       pageFormat: t.pageFormat,
-      build: (ctx) => [pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-        t.header(logo: logoImg, name: _settings.name, title: 'Z REPORT', subtitle: '*** SHIFT CLOSED ***'),
+      build: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+        t.header(logo: null, name: _settings.name, title: 'Z REPORT', subtitle: '*** SHIFT CLOSED ***'),
         pw.SizedBox(height: 4),
         t.dashedLine(h: 1.2),
-        t.row('Date', _dtf.format(DateTime.now()), size: 9, font: thermalRegular),
+        t.row('Shift', reg.shiftNumber, size: 9, font: thermalBold),
+        t.row('Business date', _dtf.format(reg.businessDate ?? reg.openedAt), size: 9, font: thermalRegular),
         t.row('Opened', _df.format(reg.openedAt), size: 9, font: thermalRegular),
         t.row('Closed', _df.format(DateTime.now()), size: 9, font: thermalRegular),
         t.row('Duration', _formatDuration(DateTime.now().difference(reg.openedAt)), size: 9, font: thermalRegular),
@@ -712,6 +770,8 @@ class PrintService {
         t.row('Gross sales', '$sym ${reg.totalSales.toStringAsFixed(0)}', size: 9, font: thermalBold),
         t.row('Discounts', '-$sym ${reg.totalDiscounts.toStringAsFixed(0)}', size: 9, font: thermalRegular),
         t.row('Tax collected', '$sym ${reg.totalTax.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+        if (data.totalServiceCharge > 0)
+          t.row('Service charge', '$sym ${data.totalServiceCharge.toStringAsFixed(0)}', size: 9, font: thermalRegular),
         t.dashedLine(),
         t.section('PAYMENT BREAKDOWN', font: thermalBold),
         t.row('Cash', '$sym ${reg.totalCashSales.toStringAsFixed(0)}', size: 9, font: thermalRegular),
@@ -729,6 +789,16 @@ class PrintService {
         t.row('Expected cash', '$sym ${reg.expectedCash.toStringAsFixed(0)}', size: 9, font: thermalBold),
         t.row('Actual cash', '$sym ${closingCash.toStringAsFixed(0)}', size: 9, font: thermalBold),
         t.row('DIFFERENCE', '${diff >= 0 ? '+' : ''}$sym ${diff.toStringAsFixed(0)}', size: 11, font: thermalBold),
+        t.dashedLine(),
+        t.section('AUDIT (from invoices)', font: thermalBold),
+        t.row('Invoice cash', '$sym ${data.invoiceCashTotal.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+        t.row('Invoice card', '$sym ${data.invoiceCardTotal.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+        t.row('Invoice wallet', '$sym ${data.invoiceWalletTotal.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+        t.row('Invoice credit', '$sym ${data.invoiceCreditTotal.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+        t.row('Counted cash', '$sym ${reg.totalCashSales.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+        t.row('CASH MISMATCH',
+          '$sym ${(reg.totalCashSales - data.invoiceCashTotal).toStringAsFixed(0)}',
+          size: 11, font: thermalBold),
         t.dashedLine(),
         t.section('KITCHEN', font: thermalBold),
         t.row('Tickets printed', '${data.kitchenGenerated}', size: 9, font: thermalRegular),
@@ -755,7 +825,7 @@ class PrintService {
         t.center('*** END OF DAY — COUNTERS RESET ***', font: thermalBold, size: 9),
         t.center(_df.format(DateTime.now()), font: thermalRegular, size: 8),
         t.credit(thermalRegular, 7),
-      ])],
+      ]),
     ));
     return pdf.save();
   }
@@ -767,12 +837,14 @@ class PrintService {
     final logoImg = await _getLogoImage();
     final sym = _settings.currencySymbol;
 
-    pdf.addPage(pw.MultiPage(
+    pdf.addPage(pw.Page(
       pageFormat: t.pageFormat,
-      build: (ctx) => [pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-        t.header(logo: logoImg, name: _settings.name, title: 'X REPORT', subtitle: '*** SHIFT SUMMARY ***'),
-        pw.SizedBox(height: 4),
+      build: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+        t.header(logo: null, name: _settings.name, title: 'X REPORT', subtitle: '*** SHIFT SUMMARY ***'),
+        pw.SizedBox(height: 2),
         t.dashedLine(h: 1.2),
+        t.row('Shift', reg.shiftNumber, size: 9, font: thermalBold),
+        t.row('Business date', _dtf.format(reg.businessDate ?? reg.openedAt), size: 9, font: thermalRegular),
         t.row('Date', _dtf.format(DateTime.now()), size: 9, font: thermalRegular),
         t.row('Time', _df.format(DateTime.now()), size: 9, font: thermalRegular),
         t.dashedLine(),
@@ -781,34 +853,34 @@ class PrintService {
           t.sub('  No items sold yet', size: 9, font: thermalRegular),
         if (data.itemSales.isNotEmpty)
           ...data.itemSales.map((s) => pw.Padding(
-            padding: const pw.EdgeInsets.only(bottom: 6),
+            padding: const pw.EdgeInsets.only(bottom: 2),
             child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-              t.item('${s.qty}x ${s.name}', '', size: 10, font: thermalBold),
-              t.sub('  $sym ${s.amount.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+              t.item('${s.qty}x ${s.name}', '', size: 9, font: thermalBold),
+              t.sub('  $sym ${s.amount.toStringAsFixed(0)}', size: 8, font: thermalRegular),
             ]),
           )),
         t.dashedLine(h: 1.2),
-        pw.SizedBox(height: 4),
+        pw.SizedBox(height: 2),
         t.section('KITCHEN', font: thermalBold),
         t.row('Tickets printed', '${data.kitchenGenerated}', size: 9, font: thermalRegular),
         t.row('Void tickets', '${data.voidedKitchen}', size: 9, font: thermalRegular),
         if (data.cancelledItems.isNotEmpty) ...[
-          pw.SizedBox(height: 4),
+          pw.SizedBox(height: 2),
           t.section('CANCELLED ITEMS', font: thermalBold),
           ...data.cancelledItems.map((c) => pw.Padding(
-            padding: const pw.EdgeInsets.only(bottom: 2),
+            padding: const pw.EdgeInsets.only(bottom: 1),
             child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-              t.row('  ${c.quantity}x ${c.itemName}', '', size: 9, font: thermalRegular),
-              t.sub('    Order #${c.orderNumber}  Ticket #${c.ticketNumber}', size: 8, font: thermalRegular),
+              t.row('  ${c.quantity}x ${c.itemName}', '', size: 8, font: thermalRegular),
+              t.sub('    Order #${c.orderNumber}  Ticket #${c.ticketNumber}', size: 7, font: thermalRegular),
             ]),
           )),
         ],
         t.dashedLine(h: 1.2),
-        pw.SizedBox(height: 4),
+        pw.SizedBox(height: 2),
         t.center('*** X REPORT — CONTINUES ***', font: thermalBold, size: 9),
         t.center(_df.format(DateTime.now()), font: thermalRegular, size: 8),
         t.credit(thermalRegular, 7),
-      ])],
+      ]),
     ));
     return pdf.save();
   }

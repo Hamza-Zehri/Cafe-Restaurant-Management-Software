@@ -262,6 +262,7 @@ class OrderEntity {
     this.deliveryCharges = 0, this.orderType = 'dine_in', this.riderId, this.riderName,
     this.notes = '', required this.createdAt, this.paidAt,
     this.kitchenTicketCount = 0, this.guestCount = 1,
+    this.shiftId, this.businessDate,
   });
   final int id;
   final String orderNumber;
@@ -285,6 +286,8 @@ class OrderEntity {
   final DateTime? paidAt;
   final int kitchenTicketCount;
   final int guestCount;
+  final int? shiftId;
+  final DateTime? businessDate;
 
   List<OrderItemEntity> get activeItems => items.where((i) => !i.isVoided).toList();
   double get subtotal => activeItems.fold(0, (s, i) => s + i.lineTotal);
@@ -321,6 +324,8 @@ class OrderEntity {
     notes: notes ?? this.notes, createdAt: createdAt, paidAt: paidAt ?? this.paidAt,
     kitchenTicketCount: kitchenTicketCount ?? this.kitchenTicketCount,
     guestCount: guestCount,
+    shiftId: shiftId ?? this.shiftId,
+    businessDate: businessDate ?? this.businessDate,
   );
 }
 
@@ -346,7 +351,7 @@ class InvoiceEntity {
     required this.paymentMethod, required this.status,
     required this.createdAt, this.customerId,
     this.paymentSplits = const [], this.changeAmount = 0,
-    this.isVoided = false,
+    this.isVoided = false, this.shiftId, this.businessDate,
   });
   final int id;
   final String invoiceNumber;
@@ -371,6 +376,8 @@ class InvoiceEntity {
   final int? customerId;
   final List<PaymentSplit> paymentSplits;
   final bool isVoided;
+  final int? shiftId;
+  final DateTime? businessDate;
 }
 
 // ── Customers / Credit ───────────────────────────────
@@ -424,6 +431,7 @@ class CashRegisterEntity {
     this.totalExpenses = 0, this.cashIn = 0, this.cashOut = 0,
     this.totalOrders = 0, this.totalKitchenTickets = 0,
     this.totalDiscounts = 0, this.totalTax = 0, this.totalVoids = 0,
+    this.businessDate, this.cashVariance = 0, this.closeReason,
   });
   final int id;
   final String openedBy;
@@ -445,8 +453,12 @@ class CashRegisterEntity {
   final double totalDiscounts;
   final double totalTax;
   final int totalVoids;
+  final DateTime? businessDate;
+  final double cashVariance;
+  final String? closeReason;
 
   bool get isOpen => status == RegisterStatus.open;
+  String get shiftNumber => '#$id';
   double get totalSales => totalCashSales + totalCardSales + totalWalletSales + totalCreditSales;
   double get expectedCash => openingCash + totalCashSales + cashIn - cashOut - totalExpenses;
   double get cashDifference => closingCash - expectedCash;

@@ -125,6 +125,7 @@ class RestaurantPOSApp extends ConsumerWidget {
         }),
         GoRoute(path: '/expenses', builder: (_, __) => const ExpenseTrackerScreen()),
         GoRoute(path: '/cash-register', builder: (_, __) => const CashRegisterScreen()),
+        GoRoute(path: '/shift-audit', builder: (_, __) => const ShiftAuditScreen()),
         GoRoute(path: '/settings', builder: (_, __) => const SettingsScreen()),
       ],
     );
@@ -428,6 +429,28 @@ void showSuccess(BuildContext ctx, String msg) =>
 
 void showError(BuildContext ctx, String msg) =>
   _showNotif(ctx, msg, AppColors.error, Icons.error_outline);
+
+/// Prompts the user to open a register before starting a sale (strict shift).
+void showMoveToRegister(BuildContext ctx) {
+  showDialog<void>(
+    context: ctx,
+    builder: (dialogCtx) => AlertDialog(
+      icon: const Icon(Icons.point_of_sale_rounded, color: Colors.orange),
+      title: const Text('No open shift'),
+      content: const Text('A shift/register must be open before you can start a sale or charge a table. Open the register first, then continue.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () {
+            Navigator.pop(dialogCtx);
+            ctx.go('/cash-register');
+          },
+          child: const Text('Open Register'),
+        ),
+      ],
+    ),
+  );
+}
 
 // ── Open orders guard ──────────────────────────────────
 // Blocks logout/exit while any order is still open for a table.
@@ -789,7 +812,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 padding: const EdgeInsets.only(right: 12),
                 child: Chip(
                   avatar: const Icon(Icons.circle, color: Colors.green, size: 10),
-                  label: Text('Register Open — ${settings.currencySymbol} ${register.expectedCash.toStringAsFixed(0)}'),
+                  label: Text('${register.shiftNumber} Open — Business ${DateFormat('dd MMM').format(register.businessDate ?? register.openedAt)}'),
                 ),
               ),
             const TopBarActions(),
@@ -802,6 +825,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             _TrialBanner(),
             const SizedBox(height: 12),
             _KPIRow(tables: tables, register: register),
+            if (register != null) ...[
+              const SizedBox(height: 20),
+              _CurrentShiftCard(register: register),
+            ],
             const SizedBox(height: 20),
             _TableOverview(tables: tables),
             const SizedBox(height: 20),
@@ -1257,6 +1284,65 @@ class _KPIRow extends ConsumerWidget {
           .animate(delay: Duration(milliseconds: i * 50)).fadeIn().slideX(begin: 0.05),
       ),
     );
+  }
+}
+
+class _CurrentShiftCard extends ConsumerWidget {
+  const _CurrentShiftCard({required this.register});
+  final CashRegisterEntity register;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(settingsProvider);
+    final isDark = context.isDark;
+    final bd = register.businessDate ?? register.openedAt;
+    return AppCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.green.withAlpha(25),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.point_of_sale_rounded, color: Colors.green, size: 16),
+              const SizedBox(width: 6),
+              Text('${register.shiftNumber} · OPEN',
+                style: const TextStyle(color: Colors.green, fontWeight: FontWeight.w700, fontSize: 13)),
+            ]),
+          ),
+            const Spacer(),
+          TextButton.icon(
+            icon: const Icon(Icons.tune_rounded, size: 15),
+            label: const Text('Manage Shift'),
+            onPressed: () => context.go('/cash-register'),
+          ),
+        ]),
+        const SizedBox(height: 14),
+        Row(children: [
+          _shiftStat(context, Icons.calendar_month_rounded, 'Business day', DateFormat('EEE, dd MMM yyyy').format(bd)),
+          _shiftStat(context, Icons.schedule_rounded, 'Opened at', DateFormat('HH:mm').format(register.openedAt)),
+          _shiftStat(context, Icons.person_rounded, 'Opened by', register.openedBy),
+          _shiftStat(context, Icons.payments_rounded, 'Current cash', '${settings.currencySymbol} ${register.expectedCash.toStringAsFixed(0)}'),
+          _shiftStat(context, Icons.assessment_rounded, 'Shift sales', '${settings.currencySymbol} ${register.totalSales.toStringAsFixed(0)}'),
+          _shiftStat(context, Icons.receipt_long_rounded, 'Orders', '${register.totalOrders}'),
+        ]),
+      ]),
+    );
+  }
+
+  Widget _shiftStat(BuildContext context, IconData icon, String label, String value) {
+    return Expanded(child: Row(children: [
+      Icon(icon, size: 16, color: context.cs.onSurfaceVariant),
+      const SizedBox(width: 8),
+      Flexible(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, maxLines: 1, overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant)),
+        Text(value, maxLines: 1, overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+      ])),
+    ]));
   }
 }
 
