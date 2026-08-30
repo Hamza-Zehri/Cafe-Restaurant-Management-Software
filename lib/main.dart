@@ -825,12 +825,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             _TrialBanner(),
             const SizedBox(height: 12),
             _KPIRow(tables: tables, register: register),
+            const SizedBox(height: 20),
+            _TableOverview(tables: tables),
             if (register != null) ...[
               const SizedBox(height: 20),
               _CurrentShiftCard(register: register),
             ],
-            const SizedBox(height: 20),
-            _TableOverview(tables: tables),
             const SizedBox(height: 20),
 
             // ── Sales Chart & Totals ─────────────────

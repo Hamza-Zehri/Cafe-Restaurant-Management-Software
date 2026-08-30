@@ -827,16 +827,19 @@ class AppDatabase extends _$AppDatabase {
         await customStatement('ALTER TABLE order_items_new RENAME TO order_items');
       }
       if (from < 8) {
-        await m.createTable(shiftAuditLogs);
-        await m.addColumn(cashRegisters, cashRegisters.businessDate);
-        await m.addColumn(cashRegisters, cashRegisters.cashVariance);
-        await m.addColumn(cashRegisters, cashRegisters.closeReason);
-        await m.addColumn(orders, orders.shiftId);
-        await m.addColumn(orders, orders.registerId);
-        await m.addColumn(orders, orders.businessDate);
-        await m.addColumn(invoices, invoices.shiftId);
-        await m.addColumn(invoices, invoices.registerId);
-        await m.addColumn(invoices, invoices.businessDate);
+        // Defensive: each step is guarded so a partially-applied migration
+        // (e.g. an interrupted upgrade) can't crash a later open and make the
+        // app fall back to a fresh setup screen on upgrade.
+        try { await m.createTable(shiftAuditLogs); } catch (_) {}
+        try { await m.addColumn(cashRegisters, cashRegisters.businessDate); } catch (_) {}
+        try { await m.addColumn(cashRegisters, cashRegisters.cashVariance); } catch (_) {}
+        try { await m.addColumn(cashRegisters, cashRegisters.closeReason); } catch (_) {}
+        try { await m.addColumn(orders, orders.shiftId); } catch (_) {}
+        try { await m.addColumn(orders, orders.registerId); } catch (_) {}
+        try { await m.addColumn(orders, orders.businessDate); } catch (_) {}
+        try { await m.addColumn(invoices, invoices.shiftId); } catch (_) {}
+        try { await m.addColumn(invoices, invoices.registerId); } catch (_) {}
+        try { await m.addColumn(invoices, invoices.businessDate); } catch (_) {}
       }
     },
     beforeOpen: (m) async {
@@ -1016,5 +1019,44 @@ LazyDatabase _open() => LazyDatabase(() async {
   final dir = await getApplicationDocumentsDirectory();
   final file = File(p.join(dir.path, 'restaurant_pos', 'pos.db'));
   await file.parent.create(recursive: true);
+  // Capture a pre-open snapshot so a failed migration/upgrade can be rolled
+  // back from the backup folder. Non-fatal if it fails.
+  await _backupBeforeOpen(file);
   return NativeDatabase.createInBackground(file);
 });
+
+/// Copies the current database (plus WAL/SHM sidecar files, so WAL-mode data
+/// is included) to `restaurant_pos/backups/pos-<timestamp>.db` before the app
+/// opens it. Keeps only the most recent [keepCount] backups to avoid clutter.
+Future<void> _backupBeforeOpen(File dbFile, {int keepCount = 5}) async {
+  try {
+    if (!await dbFile.exists()) return; // fresh install — nothing to preserve
+    final bakDir = Directory(p.join(dbFile.parent.path, 'backups'));
+    await bakDir.create(recursive: true);
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+    final dest = File(p.join(bakDir.path, 'pos-$stamp.db'));
+    await dbFile.copy(dest.path);
+    for (final suffix in ['-wal', '-shm']) {
+      final src = File('${dbFile.path}$suffix');
+      if (await src.exists()) {
+        try { await src.copy('${dest.path}$suffix'); } catch (_) {}
+      }
+    }
+    // Prune old backups, keeping the newest `keepCount`.
+    final backups = bakDir.listSync().whereType<File>()
+        .where((f) => f.path.endsWith('.db'))
+        .toList()
+      ..sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
+    for (final old in backups.skip(keepCount)) {
+      try {
+        old.deleteSync();
+        for (final suffix in ['-wal', '-shm']) {
+          final s = File('${old.path}$suffix');
+          if (s.existsSync()) s.deleteSync();
+        }
+      } catch (_) {}
+    }
+  } catch (_) {
+    // Backup is a safety net only — never block app startup on it.
+  }
+}
