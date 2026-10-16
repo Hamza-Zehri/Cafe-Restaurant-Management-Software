@@ -1074,8 +1074,10 @@ class _SalesSummaryTabState extends ConsumerState<_SalesSummaryTab> {
   }
 }
 
-// Selector strip listing the shifts opened for the chosen day/period
-class _ShiftSelector extends StatelessWidget {
+// Selector strip listing the shifts opened for the chosen day/period.
+// Capped in height and scrollable so periods with many shifts (e.g. "This year")
+// never push the summary below it off screen.
+class _ShiftSelector extends StatefulWidget {
   const _ShiftSelector({required this.shifts, required this.selectedId, required this.sym, required this.onSelect, required this.onClear});
   final List<CashRegisterRow> shifts;
   final int? selectedId;
@@ -1084,7 +1086,22 @@ class _ShiftSelector extends StatelessWidget {
   final VoidCallback onClear;
 
   @override
+  State<_ShiftSelector> createState() => _ShiftSelectorState();
+}
+
+class _ShiftSelectorState extends State<_ShiftSelector> {
+  final ScrollController _chipScroll = ScrollController();
+
+  @override
+  void dispose() {
+    _chipScroll.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final shifts = widget.shifts;
+    final sym = widget.sym;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
@@ -1096,7 +1113,7 @@ class _ShiftSelector extends StatelessWidget {
             style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
           const Spacer(),
           TextButton(
-            onPressed: shifts.isEmpty ? null : () => onSelect(null),
+            onPressed: shifts.isEmpty ? null : () => widget.onSelect(null),
             child: const Text('All periods'),
           ),
         ]),
@@ -1104,36 +1121,47 @@ class _ShiftSelector extends StatelessWidget {
         if (shifts.isEmpty)
           Text('No shifts found for the selected business day.', style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant))
         else
-          Wrap(spacing: 10, runSpacing: 10, children: [
-            ...shifts.map((r) {
-              final sales = r.totalCashSales + r.totalCardSales + r.totalWalletSales + r.totalCreditSales;
-              final selected = selectedId == r.id;
-              return InkWell(
-                onTap: () => onSelect(r.id),
-                borderRadius: BorderRadius.circular(10),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: selected ? Colors.green.withAlpha(25) : context.cardBg,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: selected ? Colors.green : context.border, width: selected ? 1.5 : 1),
-                  ),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.schedule_rounded, size: 14, color: selected ? Colors.green : context.cs.onSurfaceVariant),
-                    const SizedBox(width: 6),
-                    Text('Shift #${r.id}',
-                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13,
-                        color: selected ? Colors.green : null)),
-                    Text('  ${DateFormat('HH:mm').format(r.openedAt)}–${r.closedAt != null ? DateFormat('HH:mm').format(r.closedAt!) : 'open'}',
-                      style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant)),
-                    const SizedBox(width: 10),
-                    Text('$sym ${sales.toStringAsFixed(0)}',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: context.cs.primary)),
-                  ]),
-                ),
-              );
-            }),
-          ]),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 240),
+            child: Scrollbar(
+              controller: _chipScroll,
+              thumbVisibility: true,
+              child: SingleChildScrollView(
+                controller: _chipScroll,
+                padding: const EdgeInsets.only(right: 8, bottom: 4),
+                child: Wrap(spacing: 10, runSpacing: 10, children: [
+                  ...shifts.map((r) {
+                    final sales = r.totalCashSales + r.totalCardSales + r.totalWalletSales + r.totalCreditSales;
+                    final selected = widget.selectedId == r.id;
+                    return InkWell(
+                      onTap: () => widget.onSelect(r.id),
+                      borderRadius: BorderRadius.circular(10),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: selected ? Colors.green.withAlpha(25) : context.cardBg,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: selected ? Colors.green : context.border, width: selected ? 1.5 : 1),
+                        ),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(Icons.schedule_rounded, size: 14, color: selected ? Colors.green : context.cs.onSurfaceVariant),
+                          const SizedBox(width: 6),
+                          Text('Shift #${r.id}',
+                            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13,
+                              color: selected ? Colors.green : null)),
+                          Text('  ${DateFormat('HH:mm').format(r.openedAt)}–${r.closedAt != null ? DateFormat('HH:mm').format(r.closedAt!) : 'open'}',
+                            style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant)),
+                          const SizedBox(width: 10),
+                          Text('$sym ${sales.toStringAsFixed(0)}',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: context.cs.primary)),
+                        ]),
+                      ),
+                    );
+                  }),
+                ]),
+              ),
+            ),
+          ),
       ]),
     );
   }
@@ -1180,16 +1208,39 @@ class _PeriodSalesView extends ConsumerWidget {
   }
 }
 
+// Group invoice payments into Cash / Bank & Digital / Udhār buckets
+Map<String, double> _methodTotals(List<InvoiceRow> invoices) {
+  final out = <String, double>{'cash': 0, 'bank': 0, 'credit': 0};
+  void add(String m, double amt) {
+    if (m == 'cash') out['cash'] = out['cash']! + amt;
+    else if (isBankMethodName(m) || m == 'card' || m == 'wallet') out['bank'] = out['bank']! + amt;
+    else if (m == 'credit') out['credit'] = out['credit']! + amt;
+  }
+  for (final inv in invoices) {
+    if (inv.paymentSplitsJson.isNotEmpty) {
+      try {
+        final d = jsonDecode(inv.paymentSplitsJson) as List;
+        for (final s in d) {
+          add(s['method'] as String? ?? 'cash', (s['amount'] as num? ?? 0).toDouble());
+        }
+        continue;
+      } catch (_) {}
+    }
+    add(inv.paymentMethod, inv.grandTotal);
+  }
+  return out;
+}
+
 // Shared: renders KPI grid, payment chart, and invoice list for the given invoices
 Widget _SalesSummaryBody(WidgetRef ref, BuildContext context, List<InvoiceRow> invoices,
     List<ExpenseRow> expenses, CashRegisterRow? shift, String sym) {
   final totalSales    = invoices.fold(0.0, (s, i) => s + i.grandTotal);
   final totalDiscount = invoices.fold(0.0, (s, i) => s + i.discountValue);
   final totalTax      = invoices.fold(0.0, (s, i) => s + i.taxValue);
-  final totalCash     = invoices.where((i) => i.paymentMethod == 'cash').fold(0.0, (s, i) => s + i.grandTotal);
-  final totalCard     = invoices.where((i) => i.paymentMethod == 'card').fold(0.0, (s, i) => s + i.grandTotal);
-  final totalWallet   = invoices.where((i) => i.paymentMethod == 'wallet').fold(0.0, (s, i) => s + i.grandTotal);
-  final totalCredit   = invoices.where((i) => i.paymentMethod == 'credit').fold(0.0, (s, i) => s + i.grandTotal);
+  final byMethod      = _methodTotals(invoices);
+  final totalCash     = byMethod['cash'] ?? 0;
+  final totalBank     = byMethod['bank'] ?? 0;
+  final totalCredit   = byMethod['credit'] ?? 0;
   final totalExpenses = expenses.where((e) => shift == null || (e.createdAt.isAfter(shift.openedAt) && (shift.closedAt == null || e.createdAt.isBefore(shift.closedAt!)))).fold(0.0, (s, e) => s + e.amount);
   final profit = totalSales - totalExpenses;
   final count = invoices.length;
@@ -1219,9 +1270,8 @@ Widget _SalesSummaryBody(WidgetRef ref, BuildContext context, List<InvoiceRow> i
         crossAxisCount: 4, childAspectRatio: 2.2,
         crossAxisSpacing: 12, mainAxisSpacing: 12,
         children: [
-          _ReportKPI('Card', '$sym ${totalCard.toStringAsFixed(0)}', Icons.credit_card, AppColors.orderKitchen),
-          _ReportKPI('Wallet', '$sym ${totalWallet.toStringAsFixed(0)}', Icons.account_balance_wallet, const Color(0xFF0EA5E9)),
-          _ReportKPI('Credit', '$sym ${totalCredit.toStringAsFixed(0)}', Icons.person, const Color(0xFFDB2777)),
+          _ReportKPI('Bank & Digital', '$sym ${totalBank.toStringAsFixed(0)}', Icons.account_balance, AppColors.orderKitchen),
+          _ReportKPI('Udhār', '$sym ${totalCredit.toStringAsFixed(0)}', Icons.book_rounded, const Color(0xFFDB2777)),
           _ReportKPI('Expense items', '${totalExpenses > 0 ? expenses.where((e) => shift == null || (e.createdAt.isAfter(shift.openedAt) && (shift.closedAt == null || e.createdAt.isBefore(shift.closedAt!)))).length : 0}', Icons.receipt_long, const Color(0xFFD97706)),
         ],
       ),
@@ -1234,9 +1284,8 @@ Widget _SalesSummaryBody(WidgetRef ref, BuildContext context, List<InvoiceRow> i
             alignment: BarChartAlignment.spaceAround,
             barGroups: [
               _salesBar(0, totalCash,   AppColors.orderOpen),
-              _salesBar(1, totalCard,   AppColors.orderKitchen),
-              _salesBar(2, totalWallet, const Color(0xFF0EA5E9)),
-              _salesBar(3, totalCredit, const Color(0xFFDB2777)),
+              _salesBar(1, totalBank,   AppColors.orderKitchen),
+              _salesBar(2, totalCredit, const Color(0xFFDB2777)),
             ],
             titlesData: FlTitlesData(
               topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
@@ -1248,7 +1297,7 @@ Widget _SalesSummaryBody(WidgetRef ref, BuildContext context, List<InvoiceRow> i
               bottomTitles: AxisTitles(sideTitles: SideTitles(
                 showTitles: true, reservedSize: 22,
                 getTitlesWidget: (v, _) {
-                  const labels = ['Cash', 'Card', 'Wallet', 'Credit'];
+                  const labels = ['Cash', 'Bank/Digital', 'Udhār'];
                   return Text(labels[v.toInt()], style: const TextStyle(fontSize: 11));
                 },
               )),
@@ -1288,7 +1337,7 @@ Widget _SalesSummaryBody(WidgetRef ref, BuildContext context, List<InvoiceRow> i
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(color: Colors.green.withAlpha(20), borderRadius: BorderRadius.circular(5)),
-                child: Text(inv.paymentMethod.toUpperCase(), style: const TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.w700)),
+                child: Text(paymentMethodNameLabel(inv.paymentMethod).toUpperCase(), style: const TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.w700)),
               ),
               const SizedBox(width: 8),
               SizedBox(width: 28, height: 28, child: IconButton(
@@ -1351,6 +1400,7 @@ Future<InvoiceEntity> _buildInvoiceEntity(WidgetRef ref, InvoiceRow inv) async {
     splits = d.map((s) => PaymentSplit(
       method: PaymentMethod.values.firstWhere((m) => m.name == s['method'], orElse: () => PaymentMethod.cash),
       amount: (s['amount'] as num).toDouble(),
+      detail: s['detail'] as String?,
     )).toList();
   } catch (_) {}
   return InvoiceEntity(
@@ -1394,7 +1444,7 @@ void _showInvoiceDetail(WidgetRef ref, BuildContext ctx, InvoiceRow inv, String 
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(color: Colors.green.withAlpha(20), borderRadius: BorderRadius.circular(5)),
-                      child: Text(entity.paymentMethod.name.toUpperCase(), style: const TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.w700)),
+                      child: Text(paymentMethodLabel(entity.paymentMethod).toUpperCase(), style: const TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.w700)),
                     ),
                   ]),
                   const SizedBox(height: 4),
@@ -1588,9 +1638,8 @@ class _ZReportTabState extends ConsumerState<_ZReportTab> {
               const SizedBox(height: 14),
               _XSection('PAYMENT BREAKDOWN', [
                 ('Cash', '$sym ${register.totalCashSales.toStringAsFixed(0)}'),
-                ('Card', '$sym ${register.totalCardSales.toStringAsFixed(0)}'),
-                ('Wallet', '$sym ${register.totalWalletSales.toStringAsFixed(0)}'),
-                ('Credit', '$sym ${register.totalCreditSales.toStringAsFixed(0)}'),
+                ('Bank & Transfers', '$sym ${register.totalCardSales.toStringAsFixed(0)}'),
+                ('Udhār', '$sym ${register.totalCreditSales.toStringAsFixed(0)}'),
               ]),
               const SizedBox(height: 14),
               _XSection('KITCHEN & VOIDS', [
@@ -1793,9 +1842,8 @@ class _ZReportTabState extends ConsumerState<_ZReportTab> {
         const SizedBox(height: 12),
         _XSection('PAYMENT BREAKDOWN', [
           ('Cash', '$sym ${reg.totalCashSales.toStringAsFixed(0)}'),
-          ('Card', '$sym ${reg.totalCardSales.toStringAsFixed(0)}'),
-          ('Wallet', '$sym ${reg.totalWalletSales.toStringAsFixed(0)}'),
-          ('Credit', '$sym ${reg.totalCreditSales.toStringAsFixed(0)}'),
+          ('Bank & Transfers', '$sym ${reg.totalCardSales.toStringAsFixed(0)}'),
+          ('Udhār', '$sym ${reg.totalCreditSales.toStringAsFixed(0)}'),
         ]),
         const SizedBox(height: 12),
         _XSection('KITCHEN & VOIDS', [
@@ -2097,9 +2145,8 @@ class _ExpenseTrackerScreenState extends ConsumerState<ExpenseTrackerScreen>
                     Text('Investment & Profit Summary', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
                     const SizedBox(height: 12),
                     _ProfitBar(label: 'Cash Sales', value: cashSales, color: Colors.green, max: totalSales > 0 ? totalSales : 1, sym: sym),
-                    _ProfitBar(label: 'Card Sales', value: cardSales, color: Colors.blue, max: totalSales > 0 ? totalSales : 1, sym: sym),
-                    _ProfitBar(label: 'Wallet Sales', value: walletSales, color: Colors.purple, max: totalSales > 0 ? totalSales : 1, sym: sym),
-                    _ProfitBar(label: 'Credit Sales', value: creditSales, color: Colors.orange, max: totalSales > 0 ? totalSales : 1, sym: sym),
+                    _ProfitBar(label: 'Bank & Transfers', value: cardSales + walletSales, color: Colors.blue, max: totalSales > 0 ? totalSales : 1, sym: sym),
+                    _ProfitBar(label: 'Udhār', value: creditSales, color: const Color(0xFFDB2777), max: totalSales > 0 ? totalSales : 1, sym: sym),
                     const Divider(),
                     _ProfitBar(label: 'Expenses', value: totalExpenses, color: AppColors.error, max: totalSales > 0 ? totalSales : 1, sym: sym),
                     const SizedBox(height: 4),
@@ -2329,9 +2376,8 @@ class _ExpenseTrackerScreenState extends ConsumerState<ExpenseTrackerScreen>
                     Text('Investment & Profit Summary', style: context.tt.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
                     const SizedBox(height: 12),
                     _ProfitBar(label: 'Cash Sales', value: cashSales, color: Colors.green, max: totalSales > 0 ? totalSales : 1, sym: sym),
-                    _ProfitBar(label: 'Card Sales', value: cardSales, color: Colors.blue, max: totalSales > 0 ? totalSales : 1, sym: sym),
-                    _ProfitBar(label: 'Wallet Sales', value: walletSales, color: Colors.purple, max: totalSales > 0 ? totalSales : 1, sym: sym),
-                    _ProfitBar(label: 'Credit Sales', value: creditSales, color: Colors.orange, max: totalSales > 0 ? totalSales : 1, sym: sym),
+                    _ProfitBar(label: 'Bank & Transfers', value: cardSales + walletSales, color: Colors.blue, max: totalSales > 0 ? totalSales : 1, sym: sym),
+                    _ProfitBar(label: 'Udhār', value: creditSales, color: const Color(0xFFDB2777), max: totalSales > 0 ? totalSales : 1, sym: sym),
                     const Divider(),
                     _ProfitBar(label: 'Expenses', value: totalExpenses, color: AppColors.error, max: totalSales > 0 ? totalSales : 1, sym: sym),
                     const SizedBox(height: 4),
@@ -2878,7 +2924,10 @@ class _OpenRegisterPanel extends ConsumerWidget {
           Expanded(child: _ProfitBar(label: 'Cash Sales', value: register.totalCashSales, color: Colors.green,
             max: register.totalSales > 0 ? register.totalSales : 1, sym: sym)),
           const SizedBox(width: 12),
-          Expanded(child: _ProfitBar(label: 'Card Sales', value: register.totalCardSales, color: Colors.blue,
+          Expanded(child: _ProfitBar(label: 'Bank & Transfers', value: register.totalCardSales, color: Colors.blue,
+            max: register.totalSales > 0 ? register.totalSales : 1, sym: sym)),
+          const SizedBox(width: 12),
+          Expanded(child: _ProfitBar(label: 'Udhār', value: register.totalCreditSales, color: const Color(0xFFDB2777),
             max: register.totalSales > 0 ? register.totalSales : 1, sym: sym)),
           const SizedBox(width: 12),
           Expanded(child: _ProfitBar(label: 'Expenses', value: register.totalExpenses, color: AppColors.error,
@@ -2913,8 +2962,8 @@ class _OpenRegisterPanel extends ConsumerWidget {
             const SizedBox(height: 12),
             _XRow('Opening cash', '$sym ${register.openingCash.toStringAsFixed(0)}'),
             _XRow('Cash sales',   '$sym ${register.totalCashSales.toStringAsFixed(0)}'),
-            _XRow('Card sales',   '$sym ${register.totalCardSales.toStringAsFixed(0)}'),
-            _XRow('Wallet',       '$sym ${register.totalWalletSales.toStringAsFixed(0)}'),
+            _XRow('Bank & Transfers', '$sym ${register.totalCardSales.toStringAsFixed(0)}'),
+            _XRow('Udhār', '$sym ${register.totalCreditSales.toStringAsFixed(0)}'),
             _XRow('Cash in',      '$sym ${register.cashIn.toStringAsFixed(0)}'),
             _XRow('Cash out',     '-$sym ${register.cashOut.toStringAsFixed(0)}'),
             _XRow('Expenses',     '-$sym ${register.totalExpenses.toStringAsFixed(0)}'),
@@ -3176,7 +3225,7 @@ class _OpenRegisterPanel extends ConsumerWidget {
   }
 
   void _showXReportDialog(BuildContext context, WidgetRef ref, CashRegisterEntity register) async {
-    final data = await PrintService.instance.collectShiftData(register.openedAt);
+    final data = await PrintService.instance.collectShiftDataForShift(register.id);
     final sym = ref.read(settingsProvider).currencySymbol;
     final now = DateTime.now();
     if (!context.mounted) return;

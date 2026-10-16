@@ -44,6 +44,16 @@ class ThermalLayout {
   static const double _minLeftMm = 2.0;
   static const double _minRightMm = 3.0;
 
+  /// Height of a single thermal page.
+  ///
+  /// Long receipts are split across multiple pages by [pw.MultiPage] instead
+  /// of being emitted as one enormous page. Each page stays within the page
+  /// length most Windows thermal drivers accept (A4 ≈ 297 mm, Letter ≈ 279 mm)
+  /// and far below the Windows DEVMODE 16-bit paper-length limit (3276.7 mm).
+  /// A single 9999 mm page overflowed that field and made some drivers fall
+  /// back to a fixed-length paper, clipping the rest of the receipt.
+  static const double pageHeightMm = 280.0;
+
   /// Assumed paper geometry: [paperWidthMm] wide with margins that
   /// yield exactly 75mm of content width.
   ThermalLayout({
@@ -57,7 +67,7 @@ class ThermalLayout {
     leftMargin = leftMm * PdfPageFormat.mm;
     rightMargin = rightMm * PdfPageFormat.mm;
     contentWidth = paperWidth - leftMargin - rightMargin;
-    _pageFormat = PdfPageFormat(paperWidth, 9999 * PdfPageFormat.mm,
+    _pageFormat = PdfPageFormat(paperWidth, pageHeightMm * PdfPageFormat.mm,
         marginLeft: leftMargin, marginRight: rightMargin,
         marginTop: leftMargin, marginBottom: leftMargin);
   }
@@ -71,7 +81,7 @@ class ThermalLayout {
     contentWidth = paperWidth - leftMargin - rightMargin;
     _pageFormat = PdfPageFormat(
       paperWidth,
-      9999 * PdfPageFormat.mm,
+      pageHeightMm * PdfPageFormat.mm,
       marginLeft: leftMargin,
       marginTop: format.marginTop,
       marginRight: rightMargin,

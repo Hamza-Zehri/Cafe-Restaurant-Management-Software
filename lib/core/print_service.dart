@@ -128,14 +128,20 @@ class PrintService {
         throw const PrintException('Thermal printer is not connected.');
       }
       // Build the format for the printer driver. We explicitly set the
-      // margins to our safe margins (2mm left, 5mm right) so the driver
+      // margins to our safe margins (2mm left, 3mm right) so the driver
       // knows the content area. The right margin is intentionally larger
       // because thermal printers have a wider unprintable zone on the
-      // right edge. Height is set to a very large value so the driver
-      // does not cut or paginate at a fixed page boundary on roll paper.
+      // right edge.
+      //
+      // The height is capped at [ThermalLayout.pageHeightMm] and long
+      // receipts are paginated by MultiPage. A single 9999mm page overflowed
+      // the Windows DEVMODE 16-bit paper-length field and made some drivers
+      // fall back to a fixed A4-length paper, clipping the rest of the
+      // receipt. Keeping every page within the driver's supported length
+      // avoids that fallback.
       final thermalFormat = PdfPageFormat(
         fixedFormat.width,
-        9999 * PdfPageFormat.mm,
+        ThermalLayout.pageHeightMm * PdfPageFormat.mm,
         marginLeft: fixedFormat.marginLeft,
         marginTop: fixedFormat.marginTop,
         marginRight: fixedFormat.marginRight,
@@ -171,9 +177,9 @@ class PrintService {
   Future<void> testPrint() => _emit('Printer-Test', (format) async {
     final t = _layout(format: format);
     final pdf = pw.Document();
-    pdf.addPage(pw.Page(
+    pdf.addPage(pw.MultiPage(
       pageFormat: t.pageFormat,
-      build: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+      build: (ctx) => [
         pw.SizedBox(height: 4),
         t.center('PRINTER TEST', font: thermalBold, size: 14),
         pw.SizedBox(height: 3),
@@ -187,7 +193,7 @@ class PrintService {
         t.dashedLine(h: 1.4),
         pw.SizedBox(height: 4),
         t.credit(thermalRegular, 7),
-      ]),
+      ],
     ));
     return pdf.save();
   });
@@ -258,6 +264,18 @@ class PrintService {
             order.orderNumber, order.kitchenTicketCount, it.menuItemName, it.quantity));
           continue;
         }
+        // Only sold (paid) orders count toward item sales. A cancelled order's
+        // items were never sold, and open/unpaid orders (open, kitchenSent,
+        // hold, billPrinted) are not sold yet — including them is what inflated
+        // X/Z item quantities beyond actual sales. Voided lines on a cancelled
+        // order are still recorded so the cancelled-items section is accurate.
+        if (order.status != 'paid') {
+          if (order.status == 'cancelled') {
+            cancelledItems.add(CancelledItemEntry(
+              order.orderNumber, order.kitchenTicketCount, it.menuItemName, it.quantity));
+          }
+          continue;
+        }
         soldQty[it.menuItemName] = (soldQty[it.menuItemName] ?? 0) + it.quantity;
         soldAmount[it.menuItemName] = (soldAmount[it.menuItemName] ?? 0) + (it.unitPrice * it.quantity);
         (soldOrders[it.menuItemName] ??= <int>{}).add(order.id);
@@ -306,16 +324,14 @@ class PrintService {
       if (splits.isEmpty) {
         final m = inv.paymentMethod;
         if (m == 'cash') invCashTotal += inv.grandTotal;
-        else if (m == 'card') invCardTotal += inv.grandTotal;
-        else if (m == 'wallet') invWalletTotal += inv.grandTotal;
+        else if (isBankMethodName(m) || m == 'card' || m == 'wallet') invCardTotal += inv.grandTotal;
         else if (m == 'credit') invCreditTotal += inv.grandTotal;
       } else {
         for (final s in splits) {
           final m = s['method'] as String? ?? 'cash';
           final amt = (s['amount'] as num? ?? 0).toDouble();
           if (m == 'cash') invCashTotal += amt;
-          else if (m == 'card') invCardTotal += amt;
-          else if (m == 'wallet') invWalletTotal += amt;
+          else if (isBankMethodName(m) || m == 'card' || m == 'wallet') invCardTotal += amt;
           else if (m == 'credit') invCreditTotal += amt;
         }
       }
@@ -408,11 +424,9 @@ class PrintService {
   Future<Uint8List> _buildKitchenPDF(PdfPageFormat format, OrderEntity order, List<OrderItemEntity> items, {int? ticketNumber}) async {
     final t = _layout(format: format);
     final pdf = pw.Document();
-    pdf.addPage(pw.Page(
+    pdf.addPage(pw.MultiPage(
       pageFormat: t.pageFormat,
-      build: (ctx) => pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
+      build: (ctx) => [
           t.center('KITCHEN TICKET', font: thermalBold, size: 14),
           t.center(_settings.name, font: thermalRegular, size: 8),
           pw.SizedBox(height: 4),
@@ -449,7 +463,6 @@ class PrintService {
               font: thermalRegular, size: 8),
           pw.SizedBox(height: 10),
         ],
-      ),
     ));
     return pdf.save();
   }
@@ -459,11 +472,9 @@ class PrintService {
     final t = _layout(format: format);
     final pdf = pw.Document();
     final logoImg = await _getLogoImage();
-    pdf.addPage(pw.Page(
+    pdf.addPage(pw.MultiPage(
       pageFormat: t.pageFormat,
-      build: (ctx) => pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
+      build: (ctx) => [
           t.header(logo: logoImg, name: _settings.name),
           if (_settings.address.isNotEmpty)
             t.center(_settings.address, font: thermalRegular, size: 8),
@@ -528,7 +539,6 @@ class PrintService {
           t.credit(thermalRegular, 7),
           pw.SizedBox(height: 10),
         ],
-      ),
     ));
     return pdf.save();
   }
@@ -539,11 +549,9 @@ class PrintService {
     final pdf = pw.Document();
     final logoImg = await _getLogoImage();
     final stampImg = await _getPaidStampImage();
-    pdf.addPage(pw.Page(
+    pdf.addPage(pw.MultiPage(
       pageFormat: t.pageFormat,
-      build: (ctx) => pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
+      build: (ctx) => [
           // Logo — top center, compact, original proportions preserved
           t.header(logo: logoImg, name: _settings.name),
           if (_settings.address.isNotEmpty)
@@ -605,6 +613,13 @@ class PrintService {
           pw.SizedBox(height: 3),
           // Payment section
           t.center('PAYMENT METHOD: ${_methodLabel(inv.paymentMethod).toUpperCase()}', font: thermalBold, size: 8.5),
+          if (inv.paymentSplits.isNotEmpty) ...[
+            for (final s in inv.paymentSplits)
+              t.row(
+                '  ${paymentMethodLabel(s.method)}${s.detail != null && s.detail!.isNotEmpty ? ' (${s.detail})' : ''}',
+                '${_settings.currencySymbol} ${s.amount.toStringAsFixed(0)}', size: 8, font: thermalRegular),
+            pw.SizedBox(height: 1),
+          ],
           pw.SizedBox(height: 2),
           t.row('PAID AMOUNT', '${_settings.currencySymbol} ${inv.amountPaid.toStringAsFixed(0)}', size: 9, font: thermalBold),
           if (inv.changeAmount > 0)
@@ -630,7 +645,6 @@ class PrintService {
           t.credit(thermalRegular, 7),
           pw.SizedBox(height: 10),
         ],
-      ),
     ));
     return pdf.save();
   }
@@ -732,6 +746,15 @@ class PrintService {
               ]),
               pw.Divider(thickness: 0.5),
               _a4TotalRow('Paid (${_methodLabel(inv.paymentMethod)})', inv.amountPaid, font, fontReg),
+              if (inv.paymentSplits.isNotEmpty) ...[
+                for (final s in inv.paymentSplits)
+                  if (s.detail != null && s.detail!.isNotEmpty)
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.symmetric(vertical: 1),
+                      child: pw.Text('${paymentMethodLabel(s.method)} (${s.detail})',
+                        style: pw.TextStyle(font: fontReg, fontSize: 9)),
+                    ),
+              ],
               if (inv.changeAmount > 0) _a4TotalRow('Change', inv.changeAmount, font, fontReg),
             ])),
           ]),
@@ -753,9 +776,9 @@ class PrintService {
     final logoImg = await _getLogoImage();
     final sym = _settings.currencySymbol;
 
-    pdf.addPage(pw.Page(
+    pdf.addPage(pw.MultiPage(
       pageFormat: t.pageFormat,
-      build: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+      build: (ctx) => [
         t.header(logo: null, name: _settings.name, title: 'Z REPORT', subtitle: '*** SHIFT CLOSED ***'),
         pw.SizedBox(height: 4),
         t.dashedLine(h: 1.2),
@@ -775,9 +798,8 @@ class PrintService {
         t.dashedLine(),
         t.section('PAYMENT BREAKDOWN', font: thermalBold),
         t.row('Cash', '$sym ${reg.totalCashSales.toStringAsFixed(0)}', size: 9, font: thermalRegular),
-        t.row('Card', '$sym ${reg.totalCardSales.toStringAsFixed(0)}', size: 9, font: thermalRegular),
-        t.row('Wallet', '$sym ${reg.totalWalletSales.toStringAsFixed(0)}', size: 9, font: thermalRegular),
-        t.row('Credit', '$sym ${reg.totalCreditSales.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+        t.row('Bank & Transfers', '$sym ${reg.totalCardSales.toStringAsFixed(0)}', size: 9, font: thermalRegular),
+        t.row('Udhār', '$sym ${reg.totalCreditSales.toStringAsFixed(0)}', size: 9, font: thermalRegular),
         t.dashedLine(),
         t.section('CASH RECONCILIATION', font: thermalBold),
         t.row('Opening cash', '$sym ${reg.openingCash.toStringAsFixed(0)}', size: 9, font: thermalRegular),
@@ -789,16 +811,6 @@ class PrintService {
         t.row('Expected cash', '$sym ${reg.expectedCash.toStringAsFixed(0)}', size: 9, font: thermalBold),
         t.row('Actual cash', '$sym ${closingCash.toStringAsFixed(0)}', size: 9, font: thermalBold),
         t.row('DIFFERENCE', '${diff >= 0 ? '+' : ''}$sym ${diff.toStringAsFixed(0)}', size: 11, font: thermalBold),
-        t.dashedLine(),
-        t.section('AUDIT (from invoices)', font: thermalBold),
-        t.row('Invoice cash', '$sym ${data.invoiceCashTotal.toStringAsFixed(0)}', size: 9, font: thermalRegular),
-        t.row('Invoice card', '$sym ${data.invoiceCardTotal.toStringAsFixed(0)}', size: 9, font: thermalRegular),
-        t.row('Invoice wallet', '$sym ${data.invoiceWalletTotal.toStringAsFixed(0)}', size: 9, font: thermalRegular),
-        t.row('Invoice credit', '$sym ${data.invoiceCreditTotal.toStringAsFixed(0)}', size: 9, font: thermalRegular),
-        t.row('Counted cash', '$sym ${reg.totalCashSales.toStringAsFixed(0)}', size: 9, font: thermalRegular),
-        t.row('CASH MISMATCH',
-          '$sym ${(reg.totalCashSales - data.invoiceCashTotal).toStringAsFixed(0)}',
-          size: 11, font: thermalBold),
         t.dashedLine(),
         t.section('KITCHEN', font: thermalBold),
         t.row('Tickets printed', '${data.kitchenGenerated}', size: 9, font: thermalRegular),
@@ -825,7 +837,7 @@ class PrintService {
         t.center('*** END OF DAY — COUNTERS RESET ***', font: thermalBold, size: 9),
         t.center(_df.format(DateTime.now()), font: thermalRegular, size: 8),
         t.credit(thermalRegular, 7),
-      ]),
+      ],
     ));
     return pdf.save();
   }
@@ -837,9 +849,9 @@ class PrintService {
     final logoImg = await _getLogoImage();
     final sym = _settings.currencySymbol;
 
-    pdf.addPage(pw.Page(
+    pdf.addPage(pw.MultiPage(
       pageFormat: t.pageFormat,
-      build: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+      build: (ctx) => [
         t.header(logo: null, name: _settings.name, title: 'X REPORT', subtitle: '*** SHIFT SUMMARY ***'),
         pw.SizedBox(height: 2),
         t.dashedLine(h: 1.2),
@@ -880,7 +892,7 @@ class PrintService {
         t.center('*** X REPORT — CONTINUES ***', font: thermalBold, size: 9),
         t.center(_df.format(DateTime.now()), font: thermalRegular, size: 8),
         t.credit(thermalRegular, 7),
-      ]),
+      ],
     ));
     return pdf.save();
   }
@@ -919,14 +931,7 @@ class PrintService {
     ]),
   );
 
-  String _methodLabel(PaymentMethod m) => switch (m) {
-    PaymentMethod.cash   => 'Cash',
-    PaymentMethod.card   => 'Card',
-    PaymentMethod.bank   => 'Bank Transfer',
-    PaymentMethod.wallet => 'Wallet',
-    PaymentMethod.credit => 'Credit',
-    PaymentMethod.split  => 'Split',
-  };
+  String _methodLabel(PaymentMethod m) => paymentMethodLabel(m);
 
   String _formatDuration(Duration d) {
     final h = d.inHours;
